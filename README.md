@@ -46,14 +46,14 @@ uv sync --extra full
 #### Windows
 After syncing dependencies, install bitsandbytes manually:
 ```bash
-pip install --force-reinstall "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl"
+uv pip install --force-reinstall "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl"
 ```
 
 #### Linux
 Official multi-backend wheel (recommended for CUDA, ROCm, Intel, Apple Silicon):
 ```bash
 # Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
+uv pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
 ```
 
 ---

@@ -1,0 +1,71 @@
+[project]
+name = "ethics-model"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Björn Bethge", email = "bjoern.bethge@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.7.0",
+    "torch-geometric>=2.6.1",
+]
+
+[project.optional-dependencies]
+train = [
+    "accelerate>=0.29.2",
+    "datasets==2.16.0",
+    "hf-transfer>=0.1.9",
+    "huggingface_hub>=0.23.2",
+    "nlpaug>=1.1.11",
+    "optimum>=1.24.0",
+    "peft>=0.15.2",
+    "pyarrow>=20.0.0",
+    "safetensors>=0.4.3",
+    "tensorboard>=2.16.0",
+    "torch-tb-profiler>=0.4.3",
+    "transformers>=4.40.0",
+    "transformers_stream_generator>=0.0.5",
+    # For Linux: https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl
+    # Windows: install bitsandbytes manually after syncing dependencies:
+    # pip install --force-reinstall "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl"
+]
+dev = [
+    "pytest>=7.4.0",
+    "tensorboard>=2.16.0",
+    "torch-tb-profiler>=0.4.3"
+]
+full = [
+    # All dependencies for training, development, and testing
+    "accelerate>=0.29.2",
+    "datasets==2.16.0",
+    "hf-transfer>=0.1.9",
+    "huggingface_hub>=0.23.2",
+    "nlpaug>=1.1.11",
+    "optimum>=1.24.0",
+    "peft>=0.15.2",
+    "pyarrow>=20.0.0",
+    "pytest>=7.4.0",
+    "safetensors>=0.4.3",
+    "tensorboard>=2.16.0",
+    "torch-tb-profiler>=0.4.3",
+    "transformers>=4.40.0",
+    "transformers_stream_generator>=0.0.5",
+    # For Linux: https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl
+    # Windows: install bitsandbytes manually after syncing dependencies:
+    # pip install --force-reinstall "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl"
+]
+
+[tool.uv]
+python-preference = "only-managed"
+python-downloads = "automatic"
+link-mode = "copy"
+compile-bytecode = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

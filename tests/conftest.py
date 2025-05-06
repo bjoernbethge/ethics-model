@@ -1,6 +1,11 @@
+import os
+# CUDA-Umgebungsvariablen für bitsandbytes und CUDA-Toolkit
+os.environ["BNB_CUDA_VERSION"] = "121"
+os.environ["CUDA_HOME"] = os.environ.get("CUDA_HOME", "D:/dev/nvidia")
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"
+
 import pytest
 import tempfile
-import os
 from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.profiler

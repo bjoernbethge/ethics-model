@@ -1,8 +1,7 @@
 import os
-# ===== CUDA & bitsandbytes ENV VARS für RTX 4070 (Ada, CUDA 12.1+) =====
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # oder gewünschte GPU-ID
+# CUDA-Umgebungsvariablen für bitsandbytes und CUDA-Toolkit
 os.environ["BNB_CUDA_VERSION"] = "121"   # für CUDA 12.1
-os.environ["CUDA_HOME"] = os.environ.get("CUDA_HOME", "/usr/local/cuda")
+os.environ["CUDA_HOME"] = os.environ.get("CUDA_HOME", "D:/dev/nvidia")
 os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"  # Ada (4070/4090) Compute Capability
 # =====================================================
 

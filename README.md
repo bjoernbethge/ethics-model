@@ -16,7 +16,7 @@ A modern, modular PyTorch framework for ethical text analysis, manipulation dete
 Use **uv** for fast, modern dependency management directly from `pyproject.toml`.
 
 ### 1. Minimal installation (core dependencies)
-Install only the core dependencies:
+Install only the core dependencies if you use it in your own pipelines :
 ```bash
 uv sync
 ```

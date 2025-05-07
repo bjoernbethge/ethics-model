@@ -2,6 +2,17 @@
 
 A modern, modular PyTorch framework for ethical text analysis, manipulation detection, and narrative understanding. Supports integration with LLM embeddings (e.g., Huggingface Transformers) and Graph Neural Networks (GNNs, e.g., torch-geometric). Includes advanced attention mechanisms, moral framework modeling, and comprehensive unit tests.
 
+## Modular Design
+
+All core model components (custom `nn.Module` classes, layers, blocks, architectures) are organized in the `src/ethics_model/modules/` submodule. The main model is implemented in `src/ethics_model/model.py`.
+
+- **Extendability:** You can easily add your own layers or architectures by creating new files in `modules/` and importing them in your main model.
+- **Usage Example:**
+  ```python
+  from ethics_model.modules.attention import EthicalAttention
+  from ethics_model.model import EthicsModel
+  ```
+
 ## Features
 - Modular architecture for ethical reasoning and manipulation detection
 - LLM embedding support (e.g., GPT-2, Gemma, etc.)
@@ -63,4 +74,22 @@ uv pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bit
 After installing dependencies (see above), run the tests as usual:
 ```bash
 pytest tests/
+```
+
+---
+
+## PyTorch Geometric (GNN) and CUDA
+
+**Note:**
+For CUDA support with torch-geometric and its extensions (torch-scatter, torch-sparse, torch-cluster, torch-spline-conv), you must manually install the matching wheels. These are not available on PyPI or the PyTorch index. See the [official PyG installation guide](https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html) for details.
+
+---
+
+## Fast LLM Training Test
+
+A minimal, fast-running test for LLM training is included in `tests/test_llm_training.py`. It uses a mini dataset and checks that training runs without errors.
+
+Run the test:
+```bash
+pytest tests/test_llm_training.py
 ```

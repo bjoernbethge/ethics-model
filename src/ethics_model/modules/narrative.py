@@ -8,7 +8,7 @@ and framing techniques in text.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable
 from .activation import get_activation, ReCA
 from torch_geometric.nn import GCNConv
 
@@ -54,7 +54,7 @@ class FramingDetector(nn.Module):
             bidirectional=True
         )
         
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor, symbolic_constraints: Optional[Callable] = None) -> Dict[str, torch.Tensor]:
         """
         Detect framing techniques in text.
         
@@ -86,11 +86,16 @@ class FramingDetector(nn.Module):
             dim=-1
         ).mean(dim=-1, keepdim=True)
         
-        return {
+        result = {
             'frame_scores': frame_scores,
             'framing_strength': framing_strength,
             'consistency_score': consistency_score
         }
+        if symbolic_constraints is not None:
+            symbolic_result = symbolic_constraints(result)
+            if symbolic_result is not None:
+                return symbolic_result
+        return result
 
 
 class CognitiveDissonanceLayer(nn.Module):

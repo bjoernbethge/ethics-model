@@ -15,7 +15,7 @@ Components:
 from .moral import MoralFrameworkEmbedding, MultiFrameworkProcessor, EthicalCrossDomainLayer
 from .attention import EthicalAttention, MoralIntuitionAttention, NarrativeFrameAttention, GraphAttentionLayer, DoubleProcessingAttention
 from .narrative import NarrativeManipulationDetector, FramingDetector, CognitiveDissonanceLayer, PropagandaDetector, NarrativeGraphLayer
-from .ethics import EthicsModel
+from .model import EthicsModel
 from .activation import get_activation, ReCA
 
 __all__ = [

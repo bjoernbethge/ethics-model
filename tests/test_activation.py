@@ -1,8 +1,8 @@
 import torch
 import pytest
-from ethics_model.activation import get_activation, ReCA
+from ethics_model.modules.activation import get_activation, ReCA
 
-def test_get_activation_all(summary_writer, cpu_or_cuda_profiler):
+def test_get_activation_all(summary_writer, cpu_or_cuda_profiler, symbolic_constraints):
     names = ["relu", "leakyrelu", "prelu", "gelu", "swish", "mish", "reca"]
     for name in names:
         act = get_activation(name)

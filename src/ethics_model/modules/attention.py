@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, Callable
 from .activation import get_activation, ReCA
 from torch_geometric.nn import GATConv
 
@@ -58,7 +58,9 @@ class EthicalAttention(nn.Module):
                 key: torch.Tensor,
                 value: torch.Tensor,
                 moral_context: Optional[torch.Tensor] = None,
-                mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+                mask: Optional[torch.Tensor] = None,
+                symbolic_constraints: Optional[Callable] = None
+                ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply ethical attention to the input.
         
@@ -68,6 +70,7 @@ class EthicalAttention(nn.Module):
             value: Value tensor (batch_size, seq_len, d_model)
             moral_context: Optional moral context vector
             mask: Optional attention mask
+            symbolic_constraints: Optional callable for symbolic constraints
             
         Returns:
             output: Attended output
@@ -108,6 +111,11 @@ class EthicalAttention(nn.Module):
         # Output projection
         output = self.out_proj(attended)
         
+        if symbolic_constraints is not None:
+            symbolic_result = symbolic_constraints(output, attention_weights.mean(dim=1))
+            if symbolic_result is not None:
+                output, attention_weights_out = symbolic_result
+                return output, attention_weights_out
         return output, attention_weights.mean(dim=1)  # Average over heads for visualization
 
 

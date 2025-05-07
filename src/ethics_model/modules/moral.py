@@ -12,7 +12,7 @@ frameworks including:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Callable
 from .activation import get_activation, ReCA
 from torch_geometric.nn import GCNConv
 
@@ -162,7 +162,7 @@ class MultiFrameworkProcessor(nn.Module):
         
         self.framework_weights = nn.Parameter(torch.randn(n_frameworks))
         
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor, symbolic_constraints: Optional[Callable] = None) -> Dict[str, torch.Tensor]:
         """
         Process input through multiple ethical frameworks.
         
@@ -184,12 +184,17 @@ class MultiFrameworkProcessor(nn.Module):
         # Build consensus
         consensus_output = self.consensus_layer(combined_output)
         
-        return {
+        result = {
             'framework_outputs': framework_outputs,
             'conflict_scores': conflict_scores,
             'consensus_output': consensus_output,
             'combined_output': combined_output
         }
+        if symbolic_constraints is not None:
+            symbolic_result = symbolic_constraints(result)
+            if symbolic_result is not None:
+                return symbolic_result
+        return result
 
 
 class EthicalPrincipleEncoder(nn.Module):

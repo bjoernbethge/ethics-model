@@ -8,24 +8,24 @@ ethical analysis and narrative manipulation detection.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from torch_geometric.data import Data
 
-from .moral import (
+from .modules.moral import (
     MoralFrameworkEmbedding,
     MultiFrameworkProcessor,
     EthicalCrossDomainLayer,
     EthicalPrincipleEncoder
 )
-from .attention import (
+from .modules.attention import (
     EthicalAttention,
     MoralIntuitionAttention,
     NarrativeFrameAttention,
     DoubleProcessingAttention,
     GraphAttentionLayer
 )
-from .activation import get_activation, ReCA
-from .narrative import (
+from .modules.activation import get_activation, ReCA
+from .modules.narrative import (
     NarrativeManipulationDetector,
     FramingDetector,
     CognitiveDissonanceLayer,
@@ -113,7 +113,8 @@ class EthicsModel(nn.Module):
                 attention_mask: Optional[torch.Tensor] = None,
                 moral_context: Optional[torch.Tensor] = None,
                 edge_index: Optional[torch.Tensor] = None,
-                embeddings: Optional[torch.Tensor] = None) -> Dict[str, Any]:
+                embeddings: Optional[torch.Tensor] = None,
+                symbolic_constraints: Optional[Callable] = None) -> Dict[str, Any]:
         """
         Process input through the complete ethics model.
         Entweder input_ids (wie bisher) ODER direkt LLM-Embeddings (embeddings) übergeben.
@@ -123,6 +124,7 @@ class EthicsModel(nn.Module):
             moral_context: Optional moral context vector
             edge_index: Optional edge index for GNN processing (torch_geometric)
             embeddings: Optional LLM-Embeddings (batch_size, seq_len, d_model)
+            symbolic_constraints: Optional symbolic constraints
         Returns:
             Dictionary containing comprehensive ethics analysis
         """
@@ -148,7 +150,7 @@ class EthicsModel(nn.Module):
             hidden_states = self.graph_attention(hidden_states, edge_index)
         
         # Moral framework analysis
-        framework_outputs = self.moral_framework_processor(hidden_states)
+        framework_outputs = self.moral_framework_processor(hidden_states, symbolic_constraints=symbolic_constraints)
         
         # Ethical attention processing
         ethical_attended, attention_weights = self.ethical_attention(
@@ -156,7 +158,8 @@ class EthicsModel(nn.Module):
             hidden_states,
             hidden_states,
             moral_context=moral_context,
-            mask=attention_mask
+            mask=attention_mask,
+            symbolic_constraints=symbolic_constraints
         )
         
         # Moral intuition processing
@@ -167,7 +170,7 @@ class EthicsModel(nn.Module):
         
         # Narrative analysis
         narrative_outputs = self.narrative_frame_attention(dual_process_output)
-        framing_outputs = self.framing_detector(dual_process_output)
+        framing_outputs = self.framing_detector(dual_process_output, symbolic_constraints=symbolic_constraints)
         dissonance_outputs = self.cognitive_dissonance(dual_process_output)
         
         # Manipulation detection

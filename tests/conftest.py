@@ -30,3 +30,8 @@ def cpu_or_cuda_profiler():
         activities = [torch.profiler.ProfilerActivity.CPU]
     with torch.profiler.profile(activities=activities, record_shapes=True) as prof:
         yield prof 
+
+@pytest.fixture
+def symbolic_constraints():
+    # Dummy-Constraint, kann in Tests überschrieben werden
+    return None 

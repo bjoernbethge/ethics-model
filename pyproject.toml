@@ -8,8 +8,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
- 
-    "torch==2.7.0+cu128",
+    "pytorch-symbolic>=1.1.1",
+    "torch==2.6.0",
     "torch-geometric>=2.6.1",
 ]
 
@@ -63,6 +63,11 @@ python-preference = "only-managed"
 python-downloads = "automatic"
 link-mode = "copy"
 compile-bytecode = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]

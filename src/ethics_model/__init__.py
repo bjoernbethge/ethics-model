@@ -12,11 +12,11 @@ Components:
 - Meta-cognitive Processing for Bias Detection
 """
 
-from .moral import MoralFrameworkEmbedding, MultiFrameworkProcessor, EthicalCrossDomainLayer
-from .attention import EthicalAttention, MoralIntuitionAttention, NarrativeFrameAttention, GraphAttentionLayer, DoubleProcessingAttention
-from .narrative import NarrativeManipulationDetector, FramingDetector, CognitiveDissonanceLayer, PropagandaDetector, NarrativeGraphLayer
+from .modules.moral import MoralFrameworkEmbedding, MultiFrameworkProcessor, EthicalCrossDomainLayer
+from .modules.attention import EthicalAttention, MoralIntuitionAttention, NarrativeFrameAttention, GraphAttentionLayer, DoubleProcessingAttention
+from .modules.narrative import NarrativeManipulationDetector, FramingDetector, CognitiveDissonanceLayer, PropagandaDetector, NarrativeGraphLayer
+from .modules.activation import get_activation, ReCA
 from .model import EthicsModel
-from .activation import get_activation, ReCA
 
 __all__ = [
     'MoralFrameworkEmbedding',

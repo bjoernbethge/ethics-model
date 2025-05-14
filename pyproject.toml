@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "bitsandbytes>=0.45.5",
     "pytorch-symbolic>=1.1.1",
     # "torch" NICHT hier eintragen! Für CUDA siehe README und installiere das passende Wheel manuell nach dem uv sync:
     # uv pip install torch==2.6.0+cu126 --index-url https://download.pytorch.org/whl/cu126 --force-reinstall

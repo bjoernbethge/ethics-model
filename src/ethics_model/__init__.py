@@ -10,15 +10,24 @@ Components:
 - Ethical Attention Mechanisms
 - Narrative Manipulation Detection Layers
 - Meta-cognitive Processing for Bias Detection
+- FastAPI-based Inference API
 """
 
 from .modules.moral import MoralFrameworkEmbedding, MultiFrameworkProcessor, EthicalCrossDomainLayer
 from .modules.attention import EthicalAttention, MoralIntuitionAttention, NarrativeFrameAttention, GraphAttentionLayer, DoubleProcessingAttention
 from .modules.narrative import NarrativeManipulationDetector, FramingDetector, CognitiveDissonanceLayer, PropagandaDetector, NarrativeGraphLayer
 from .modules.activation import get_activation, ReCA
-from .model import EthicsModel
+from .model import EthicsModel, create_ethics_model
+
+# Optional API imports
+try:
+    from .api import app as api_app
+except ImportError:
+    # FastAPI may not be installed
+    api_app = None
 
 __all__ = [
+    # Core components
     'MoralFrameworkEmbedding',
     'MultiFrameworkProcessor',
     'EthicalCrossDomainLayer',
@@ -29,12 +38,16 @@ __all__ = [
     'FramingDetector',
     'CognitiveDissonanceLayer',
     'EthicsModel',
+    'create_ethics_model',
     'get_activation',
     'ReCA',
     'GraphAttentionLayer',
     'DoubleProcessingAttention',
     'PropagandaDetector',
-    'NarrativeGraphLayer'
+    'NarrativeGraphLayer',
+    
+    # API components
+    'api_app'
 ]
 
 __version__ = '0.1.0'

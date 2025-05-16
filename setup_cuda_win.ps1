@@ -17,6 +17,4 @@ uv pip install torch==2.6.0+cu126 --index-url https://download.pytorch.org/whl/c
 # 4. bitsandbytes installieren (Windows Wheel)
 Write-Host "Installiere bitsandbytes ..."
 uv pip install --force-reinstall "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl"
-# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl'
 Write-Host "Done." 

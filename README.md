@@ -21,7 +21,7 @@ uv sync --extra full
   ./setup_cuda_win.ps1
   ```
   These scripts will:
-  - Install the correct CUDA-enabled PyTorch wheel (`torch==2.6.0+cu126`)
+  - Install the correct CUDA-enabled PyTorch wheel (`torch==2.7.0+cu128`)
   - Install the latest bitsandbytes wheel for your platform
   - Print `Done.` when finished
 
@@ -39,6 +39,43 @@ python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda
 ```bash
 pytest tests/
 ```
+
+## Development with Docker (New!)
+
+We've added Docker support to make development easier and more consistent across different environments.
+
+**Using the Development Container with JetBrains IDEs:**
+
+1. **Setup the development container:**
+   - **Linux/macOS:**
+     ```bash
+     chmod +x setup_dev_container.sh
+     ./setup_dev_container.sh
+     ```
+   - **Windows (PowerShell):**
+     ```powershell
+     .\setup_dev_container.ps1
+     ```
+
+2. **Configure JetBrains IDE (PyCharm/IntelliJ) to use the container:**
+   - Open the project in your JetBrains IDE
+   - Go to File > Settings > Project: ethics-model > Python Interpreter
+   - Click on the gear icon and select 'Add'
+   - Choose 'Docker Compose' from the left panel
+   - Select the docker-compose.yml file in your project
+   - Select the 'ethics-model-dev' service
+   - Click 'OK' to add the interpreter
+
+3. **Run the project inside the container:**
+   - All Python runs, tests, and debugging will now use the containerized environment
+   - The container includes all dependencies and proper CUDA setup
+   - Code changes are reflected immediately due to volume mounting
+
+**Benefits:**
+- Consistent development environment for all contributors
+- Proper CUDA and bitsandbytes setup
+- All dependencies pre-installed
+- Isolated environment without affecting your system Python
 
 ---
 

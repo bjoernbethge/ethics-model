@@ -5,14 +5,12 @@ This module adds routes for model training, visualization, and evaluation
 to the main Ethics Model API.
 """
 
-import json
 import logging
 import os
 import time
 import uuid
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -20,11 +18,9 @@ from fastapi import Depends, BackgroundTasks, HTTPException, APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ..data import MultiTaskDataset
-from ..model import EthicsModel
-from ..training import train
 from .dependencies import get_model, get_tokenizer, get_llm
 from .settings import Settings, get_settings
+from ..model import EthicsModel
 
 # Configure logging
 logger = logging.getLogger("ethics_model.api.training")

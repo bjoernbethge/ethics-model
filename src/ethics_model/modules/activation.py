@@ -4,7 +4,7 @@ from torch.nn.functional import relu
 
 # Moderne Aktivierungsfunktion (2025):
 class ReCA(nn.Module):
-    def __init__(self, alpha: float = 0.25, beta: float = 0.5):
+    def __init__(self, alpha: float = 0.25, beta: float = 0.3):
         super().__init__()
         self.alpha = nn.Parameter(torch.tensor(alpha))
         self.beta = nn.Parameter(torch.tensor(beta))

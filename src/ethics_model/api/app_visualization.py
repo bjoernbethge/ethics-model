@@ -6,18 +6,16 @@ including attention maps, framework activations, and manipulation detection.
 """
 
 import logging
-import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, Any
 
-import numpy as np
 import torch
 from fastapi import Depends, HTTPException, APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ..model import EthicsModel
 from .dependencies import get_model, get_tokenizer, get_llm
 from .settings import Settings, get_settings
+from ..model import EthicsModel
 
 # Configure logging
 logger = logging.getLogger("ethics_model.api.visualization")

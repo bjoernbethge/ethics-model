@@ -37,8 +37,13 @@ class EthicalRelationExtractor:
         except OSError:
             print(f"Warning: Could not load spaCy model '{model_name}'. "
                   f"Please install with: python -m spacy download {model_name}")
-            # Create a blank model as fallback
             self.nlp = spacy.blank("en")
+        # Sentencizer hinzufügen, falls nicht vorhanden
+        if "sentencizer" not in self.nlp.pipe_names:
+            try:
+                self.nlp.add_pipe("sentencizer")
+            except Exception as e:
+                print(f"Warning: Could not add sentencizer: {e}")
         
         # Ethical concept dictionaries
         self.moral_actions = {

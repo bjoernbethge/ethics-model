@@ -1,53 +1,49 @@
 """
-Ethics Model PyTorch Extension
+Ethics Model - Comprehensive Ethical Text Analysis Framework
 
-This package provides specialized layers and attention mechanisms for processing
-ethical narratives, moral frameworks, and developing models that can detect
-and analyze ethical manipulation in text.
-
-Components:
-- Moral Framework Embeddings (Deontological, Utilitarian, Virtue Ethics)
-- Ethical Attention Mechanisms
-- Narrative Manipulation Detection Layers
-- Meta-cognitive Processing for Bias Detection
-- FastAPI-based Inference API
+A modern, modular PyTorch framework for ethical text analysis, manipulation
+detection, and narrative understanding using NetworkX and spaCy.
 """
 
-from .modules.moral import MoralFrameworkEmbedding, MultiFrameworkProcessor, EthicalCrossDomainLayer
-from .modules.attention import EthicalAttention, MoralIntuitionAttention, NarrativeFrameAttention, GraphAttentionLayer, DoubleProcessingAttention
-from .modules.narrative import NarrativeManipulationDetector, FramingDetector, CognitiveDissonanceLayer, PropagandaDetector, NarrativeGraphLayer
-from .modules.activation import get_activation, ReCA
-from .model import EthicsModel, create_ethics_model
+from .model import EnhancedEthicsModel, EthicsModel, create_ethics_model
+from .data import (
+    MultiTaskDataset,
+    GraphEthicsDataset,
+    collate_ethics_batch,
+    create_data_splits,
+    load_from_json,
+    save_to_json
+)
+from .training import train, validate, calculate_metrics
+from .graph_reasoning import (
+    EthicalRelationExtractor,
+    EthicalGNN,
+    extract_and_visualize
+)
 
-# Optional API imports
-try:
-    from .api import app as api_app
-except ImportError:
-    # FastAPI may not be installed
-    api_app = None
+__version__ = "0.2.0"
 
 __all__ = [
-    # Core components
-    'MoralFrameworkEmbedding',
-    'MultiFrameworkProcessor',
-    'EthicalCrossDomainLayer',
-    'EthicalAttention',
-    'MoralIntuitionAttention',
-    'NarrativeFrameAttention',
-    'NarrativeManipulationDetector',
-    'FramingDetector',
-    'CognitiveDissonanceLayer',
+    # Models
+    'EnhancedEthicsModel',
     'EthicsModel',
     'create_ethics_model',
-    'get_activation',
-    'ReCA',
-    'GraphAttentionLayer',
-    'DoubleProcessingAttention',
-    'PropagandaDetector',
-    'NarrativeGraphLayer',
     
-    # API components
-    'api_app'
+    # Data processing
+    'MultiTaskDataset',
+    'GraphEthicsDataset',
+    'collate_ethics_batch',
+    'create_data_splits',
+    'load_from_json',
+    'save_to_json',
+    
+    # Training
+    'train',
+    'validate',
+    'calculate_metrics',
+    
+    # Graph reasoning
+    'EthicalRelationExtractor',
+    'EthicalGNN',
+    'extract_and_visualize',
 ]
-
-__version__ = '0.1.0'

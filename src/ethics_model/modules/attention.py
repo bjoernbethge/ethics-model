@@ -77,6 +77,7 @@ class EthicalAttention(nn.Module):
             attention_weights: Attention distribution
         """
         batch_size = query.size(0)
+        seq_len = query.size(1)
         
         # Linear projections
         q = self.q_proj(query).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
@@ -88,11 +89,18 @@ class EthicalAttention(nn.Module):
         
         # Add moral context if provided
         if moral_context is not None:
-            moral_bias = self.moral_context_proj(moral_context)
-            moral_bias = moral_bias.view(batch_size, 1, 1, self.d_model)
-            scores = scores + self.moral_attention_weight * torch.matmul(
-                q, moral_bias.transpose(-2, -1)
-            ) / self.scale
+            # Projiziere den moralischen Kontext
+            moral_bias = self.moral_context_proj(moral_context)  # [batch_size, d_model]
+            
+            # Teile den moralischen Kontext für Multi-Head-Attention auf
+            moral_bias = moral_bias.view(batch_size, 1, self.n_heads, self.d_k)
+            moral_bias = moral_bias.permute(0, 2, 1, 3)  # [batch_size, n_heads, 1, d_k]
+            
+            # Berechne den moralischen Bias-Term für die Scores
+            # Füge eine zusätzliche Dimension für die Sequenzlänge hinzu
+            bias_expand = moral_bias.expand(batch_size, self.n_heads, seq_len, self.d_k)
+            bias_term = torch.sum(q * bias_expand, dim=-1, keepdim=True) * self.moral_attention_weight
+            scores = scores + bias_term
         
         # Apply mask if provided
         if mask is not None:
@@ -134,6 +142,7 @@ class MoralIntuitionAttention(nn.Module):
         
         # Moral foundations: Care, Fairness, Loyalty, Authority, Purity, Liberty
         self.moral_foundation_embeddings = nn.Embedding(n_moral_foundations, d_model)
+        self.n_moral_foundations = n_moral_foundations
         
         self.activation = get_activation(activation)
         
@@ -167,42 +176,49 @@ class MoralIntuitionAttention(nn.Module):
             
         Returns:
             Dictionary containing:
-                - intuitive_response: Quick moral judgment
-                - emotional_intensity: Emotional response strength
-                - foundation_activations: Activation of each moral foundation
+                - intuitive_response: Quick moral judgment (batch_size, n_moral_foundations)
+                - emotional_intensity: Emotional response strength (batch_size, seq_len, 1)
+                - foundation_activations: Activation of each moral foundation (batch_size, n_moral_foundations)
         """
-        # Expand moral foundations to sequence length
+        batch_size = x.size(0)
         seq_len = x.size(1)
+        
+        # Expand moral foundations to sequence length
         foundation_ids = torch.arange(
             0, 
-            len(self.moral_foundation_embeddings.weight), 
+            self.n_moral_foundations, 
             device=x.device
-        ).unsqueeze(0).expand(x.size(0), -1)
+        ).unsqueeze(0).expand(batch_size, -1)
         
-        foundation_embeds = self.moral_foundation_embeddings(foundation_ids)
+        foundation_embeds = self.moral_foundation_embeddings(foundation_ids)  # [batch_size, n_moral_foundations, d_model]
         
         # Combine input with foundations
-        input_expanded = x.unsqueeze(2).expand(-1, -1, foundation_embeds.size(1), -1)
-        foundation_expanded = foundation_embeds.unsqueeze(1).expand(-1, seq_len, -1, -1)
+        input_expanded = x.unsqueeze(2).expand(-1, -1, foundation_embeds.size(1), -1)  # [batch_size, seq_len, n_foundations, d_model]
+        foundation_expanded = foundation_embeds.unsqueeze(1).expand(-1, seq_len, -1, -1)  # [batch_size, seq_len, n_foundations, d_model]
         
-        combined = torch.cat([input_expanded, foundation_expanded], dim=-1)
+        combined = torch.cat([input_expanded, foundation_expanded], dim=-1)  # [batch_size, seq_len, n_foundations, 2*d_model]
         
         # Quick intuitive scoring
-        intuition_scores = self.intuition_scorer(combined)
+        intuition_scores = self.intuition_scorer(combined)  # [batch_size, seq_len, n_foundations, 1]
         
         # Compute emotional intensity
-        emotional_intensity = self.emotion_amplifier(x)
+        emotional_intensity = self.emotion_amplifier(x)  # [batch_size, seq_len, 1]
         
         # Weight intuitions by emotional intensity
-        weighted_intuitions = intuition_scores * emotional_intensity.unsqueeze(-1)
+        weighted_intuitions = intuition_scores * emotional_intensity.unsqueeze(-2)  # [batch_size, seq_len, n_foundations]
         
-        # Average over sequence to get overall intuitive response
-        intuitive_response = weighted_intuitions.mean(dim=1)
+        # Average over sequence to get overall intuitive response - korrigiere die Dimensionen
+        intuitive_response = weighted_intuitions.mean(dim=1)  # [batch_size, n_foundations]
+        
+        # Stelle sicher, dass die Ausgabeform korrekt ist
+        if len(intuitive_response.shape) == 3 and intuitive_response.shape[2] == self.n_moral_foundations:
+            # Reduziere die überschüssige Dimension
+            intuitive_response = intuitive_response.squeeze(-1)
         
         return {
-            'intuitive_response': intuitive_response,
-            'emotional_intensity': emotional_intensity,
-            'foundation_activations': intuitive_response
+            'intuitive_response': intuitive_response,  # (batch_size, n_moral_foundations)
+            'emotional_intensity': emotional_intensity,  # (batch_size, seq_len, 1)
+            'foundation_activations': intuitive_response  # (batch_size, n_moral_foundations)
         }
 
 
@@ -382,7 +398,7 @@ class GraphAttentionLayer(nn.Module):
     """
     def __init__(self, in_channels: int, out_channels: int, heads: int = 1, activation: str = "gelu"):
         super().__init__()
-        self.gat = GATConv(in_channels, out_channels, heads=heads)
+        self.gat = GATConv(in_channels, out_channels, heads=heads, concat=False)
         self.activation = get_activation(activation)
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         x = self.gat(x, edge_index)

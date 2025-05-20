@@ -211,13 +211,13 @@ class EthicalPrincipleEncoder(nn.Module):
         # Principle embeddings
         self.principle_embeddings = nn.Embedding(n_principles, d_model)
         
-        # Principle interaction matrix
+        # Principle interaction matrix - angepasst für die korrekte Größe
         self.principle_interaction = nn.Parameter(
-            torch.randn(n_principles, n_principles)
+            torch.randn(d_model, d_model)
         )
         
         # Output projection
-        self.output_proj = nn.Linear(d_model * n_principles, d_model)
+        self.output_proj = nn.Linear(n_principles * d_model, d_model)
         
     def forward(self, principle_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -229,20 +229,21 @@ class EthicalPrincipleEncoder(nn.Module):
         Returns:
             encoded_principles: Encoded principles with interactions
         """
+        batch_size, n_principles = principle_ids.shape
+        d_model = self.principle_embeddings.embedding_dim
+        
         # Get embeddings for each principle
         embeddings = self.principle_embeddings(principle_ids)  # (batch, n_principles, d_model)
         
-        # Model principle interactions
-        interactions = torch.matmul(
-            self.principle_interaction, 
-            embeddings.transpose(-2, -1)
-        ).transpose(-2, -1)
+        # Model principle interactions - vereinfacht und korrigiert
+        # Anwenden der Interaktion auf jedes Embedding
+        interactions = torch.matmul(embeddings, self.principle_interaction)
         
         # Combine original embeddings with interactions
         combined = embeddings + interactions
         
         # Reshape and project
-        combined_flat = combined.reshape(combined.size(0), -1)
+        combined_flat = combined.reshape(batch_size, -1)
         encoded_principles = self.output_proj(combined_flat)
         
         return encoded_principles

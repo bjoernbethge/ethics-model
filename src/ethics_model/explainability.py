@@ -274,8 +274,13 @@ class GraphExplainer:
         except OSError:
             print(f"Warning: Could not load spaCy model '{spacy_model}'. "
                   f"Please install with: python -m spacy download {spacy_model}")
-            # Create a blank model as fallback
             self.nlp = spacy.blank("en")
+        # Sentencizer hinzufügen, falls nicht vorhanden
+        if "sentencizer" not in self.nlp.pipe_names:
+            try:
+                self.nlp.add_pipe("sentencizer")
+            except Exception as e:
+                print(f"Warning: Could not add sentencizer: {e}")
         
         # Ethical concept dictionaries
         self.moral_concepts = {
@@ -745,7 +750,14 @@ class EthicsExplainer:
             padding='max_length',
             truncation=True,
             max_length=128
-        ).to(self.device)
+        )
+        # Device handling für dict
+        if isinstance(inputs, dict):
+            for k, v in inputs.items():
+                if hasattr(v, 'to'):
+                    inputs[k] = v.to(self.device)
+        else:
+            inputs = inputs.to(self.device)
         
         # Function to get embeddings
         def get_embeddings(input_ids):

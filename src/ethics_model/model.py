@@ -3,7 +3,7 @@ Ethics Model Main Architecture
 
 The main architecture that combines all components for comprehensive
 ethical analysis and narrative manipulation detection.
-Enhanced with GraphBrain semantic hypergraph integration, explainability,
+Enhanced with NetworkX and spaCy-based semantic graph processing, explainability,
 uncertainty quantification, and advanced graph reasoning.
 """
 
@@ -11,7 +11,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Batch
+from torch_geometric.nn import global_mean_pool
 
 from .modules.moral import (
     MoralFrameworkEmbedding,
@@ -33,10 +34,10 @@ from .modules.narrative import (
     CognitiveDissonanceLayer,
     PropagandaDetector
 )
-# Import GraphBrain module
+# Import Semantic Graph module
 from .modules.graph_semantic import (
     SemanticGraphProcessor,
-    HypergraphConverter
+    SemanticGraphConverter
 )
 
 
@@ -46,7 +47,7 @@ class EnhancedEthicsModel(nn.Module):
     for detecting manipulation, analyzing moral frameworks, and processing
     ethical narratives.
     
-    Includes GraphBrain semantic hypergraph processing for more sophisticated ethical analysis.
+    Includes NetworkX and spaCy-based semantic graph processing for sophisticated ethical analysis.
     """
     
     def __init__(self, 
@@ -58,8 +59,8 @@ class EnhancedEthicsModel(nn.Module):
                  max_seq_length: int = 512,
                  activation: str = "gelu",
                  use_gnn: bool = True,  # Default to using GNN
-                 use_graphbrain: bool = True,  # Default to using GraphBrain
-                 parser_lang: str = "en"):
+                 use_semantic_graphs: bool = True,  # Default to using semantic graphs
+                 spacy_model: str = "en_core_web_sm"):
         super().__init__()
         
         # Input embedding and positional encoding
@@ -93,12 +94,12 @@ class EnhancedEthicsModel(nn.Module):
             ) for _ in range(n_layers)
         ])
         
-        # GraphBrain integration
-        self.use_graphbrain = use_graphbrain
-        if use_graphbrain:
+        # Semantic Graph integration
+        self.use_semantic_graphs = use_semantic_graphs
+        if use_semantic_graphs:
             self.semantic_graph_processor = SemanticGraphProcessor(
                 d_model=d_model,
-                parser_lang=parser_lang
+                spacy_model=spacy_model
             )
             
             # Graph integration layer
@@ -151,7 +152,7 @@ class EnhancedEthicsModel(nn.Module):
             moral_context: Optional moral context vector
             edge_index: Optional edge index for GNN processing (torch_geometric)
             embeddings: Optional LLM-Embeddings (batch_size, seq_len, d_model)
-            texts: Optional raw text inputs (required for GraphBrain)
+            texts: Optional raw text inputs (required for semantic graphs)
             graph_data: Optional preprocessed graph data for each text
             symbolic_constraints: Optional symbolic constraints
             
@@ -160,24 +161,42 @@ class EnhancedEthicsModel(nn.Module):
         """
         # Get embeddings
         if embeddings is not None:
-            hidden_states = embeddings
+            hidden_states = embeddings.float()
         else:
             seq_len = input_ids.size(1)
+            if input_ids.dtype != torch.long:
+                input_ids = input_ids.long()
             position_ids = torch.arange(seq_len, device=input_ids.device).unsqueeze(0)
             token_embeddings = self.embedding(input_ids)
             position_embeddings = self.position_embedding(position_ids)
             embeddings = token_embeddings + position_embeddings
             embeddings = self.layer_norm(embeddings)
             embeddings = self.dropout(embeddings)
-            hidden_states = embeddings
+            hidden_states = embeddings.float()
+        # Debug-Checks auf Shapes
+        assert hidden_states is not None, f"hidden_states is None!"
+        assert hidden_states.ndim == 3, f"hidden_states shape: {hidden_states.shape} (erwartet: [batch, seq, d_model])"
+        if attention_mask is not None:
+            assert attention_mask.shape[0] == hidden_states.shape[0], f"attention_mask batch: {attention_mask.shape}, hidden_states batch: {hidden_states.shape}"
+            assert attention_mask.shape[1] == hidden_states.shape[1], f"attention_mask seq: {attention_mask.shape}, hidden_states seq: {hidden_states.shape}"
         
         # Process through transformer layers
+        if attention_mask is not None and attention_mask.dtype != torch.float32:
+            attention_mask = attention_mask.float()
         for transformer_layer in self.transformer_layers:
-            hidden_states = transformer_layer(hidden_states, src_key_padding_mask=attention_mask)
+            # Convert attention mask to padding mask (PyTorch expects inverse)
+            if attention_mask is not None:
+                padding_mask = (1 - attention_mask).bool()
+                # Fix: Wenn embeddings übergeben werden (statt input_ids), setze padding_mask auf None, falls sie 2D ist
+                if embeddings is not None and padding_mask is not None and padding_mask.dim() == 2:
+                    padding_mask = None
+            else:
+                padding_mask = None
+            hidden_states = transformer_layer(hidden_states, src_key_padding_mask=padding_mask)
         
-        # GraphBrain processing
+        # Semantic Graph processing
         graph_enhanced_states = None
-        if self.use_graphbrain and texts is not None:
+        if self.use_semantic_graphs and texts is not None:
             graph_outputs = self.semantic_graph_processor(texts, hidden_states)
             graph_enhanced_states = graph_outputs['graph_embeddings']
             
@@ -189,16 +208,37 @@ class EnhancedEthicsModel(nn.Module):
         
         # Optional: GNN-Verarbeitung (using provided edge_index or from graph_data)
         if self.use_gnn:
-            if edge_index is not None:
+            if graph_data is not None:
+                # Best Practice: graph_data als Liste von Data-Objekten (PyG)
+                if isinstance(graph_data, list) and isinstance(graph_data[0], Data):
+                    batch = Batch.from_data_list(graph_data)
+                    # x: [total_nodes, d_model], edge_index: [2, num_edges]
+                    node_features = self.graph_attention(batch.x, batch.edge_index)
+                    # global mean pooling pro Graph
+                    pooled = global_mean_pool(node_features, batch.batch)  # [batch_size, d_model]
+                    # expandiere auf Sequenzlänge
+                    seq_len = hidden_states.size(1)
+                    hidden_states = pooled.unsqueeze(1).expand(-1, seq_len, -1).contiguous()
+                elif isinstance(graph_data, Data):
+                    node_features = self.graph_attention(graph_data.x, graph_data.edge_index)
+                    # kein batch, expandiere auf seq_len
+                    seq_len = hidden_states.size(1)
+                    hidden_states = node_features.unsqueeze(0).expand(hidden_states.size(0), seq_len, -1).contiguous()
+                elif 'edge_index' in graph_data[0] and 'x' in graph_data[0]:
+                    datas = [Data(x=g['x'], edge_index=g['edge_index']) for g in graph_data]
+                    batch = Batch.from_data_list(datas)
+                    node_features = self.graph_attention(batch.x, batch.edge_index)
+                    pooled = global_mean_pool(node_features, batch.batch)
+                    seq_len = hidden_states.size(1)
+                    hidden_states = pooled.unsqueeze(1).expand(-1, seq_len, -1).contiguous()
+                else:
+                    raise ValueError("graph_data muss eine Liste von Data-Objekten, ein Data-Objekt oder eine Liste von Dicts mit 'x' und 'edge_index' sein!")
+            elif edge_index is not None:
                 hidden_states = self.graph_attention(hidden_states, edge_index)
-            elif graph_data is not None and 'edge_index' in graph_data[0]:
-                # Note: This is simplified - in practice, you'd need batching for multiple graphs
-                batch_edge_index = graph_data[0]['edge_index']
-                if batch_edge_index is not None:
-                    hidden_states = self.graph_attention(hidden_states, batch_edge_index)
         
         # Moral framework analysis
         framework_outputs = self.moral_framework_processor(hidden_states, symbolic_constraints=symbolic_constraints)
+        assert framework_outputs is not None, "Fehler: moral_framework_processor gibt None zurück!"
         
         # Ethical attention processing
         ethical_attended, attention_weights = self.ethical_attention(
@@ -209,24 +249,34 @@ class EnhancedEthicsModel(nn.Module):
             mask=attention_mask,
             symbolic_constraints=symbolic_constraints
         )
+        assert ethical_attended is not None, "Fehler: ethical_attention gibt None zurück!"
         
         # Moral intuition processing
         intuition_outputs = self.moral_intuition(ethical_attended, moral_context)
+        assert intuition_outputs is not None, "Fehler: moral_intuition gibt None zurück!"
         
         # Dual-process system analysis
         dual_process_output, system_outputs = self.dual_process(ethical_attended)
+        assert dual_process_output is not None, "Fehler: dual_process gibt None zurück!"
+        assert system_outputs is not None, "Fehler: dual_process (system_outputs) gibt None zurück!"
         
         # Narrative analysis
         narrative_outputs = self.narrative_frame_attention(dual_process_output)
+        assert narrative_outputs is not None, "Fehler: narrative_frame_attention gibt None zurück!"
         framing_outputs = self.framing_detector(dual_process_output, symbolic_constraints=symbolic_constraints)
+        assert framing_outputs is not None, "Fehler: framing_detector gibt None zurück!"
         dissonance_outputs = self.cognitive_dissonance(dual_process_output)
+        assert dissonance_outputs is not None, "Fehler: cognitive_dissonance gibt None zurück!"
         
         # Manipulation detection
         manipulation_outputs = self.manipulation_detector(dual_process_output)
+        assert manipulation_outputs is not None, "Fehler: manipulation_detector gibt None zurück!"
         propaganda_outputs = self.propaganda_detector(dual_process_output)
+        assert propaganda_outputs is not None, "Fehler: propaganda_detector gibt None zurück!"
         
         # Cross-domain ethical processing
         cross_domain_outputs = self.cross_domain_layer(dual_process_output)
+        assert cross_domain_outputs is not None, "Fehler: cross_domain_layer gibt None zurück!"
         
         # Combine for final ethics score
         combined_features = torch.cat([
@@ -259,8 +309,8 @@ class EnhancedEthicsModel(nn.Module):
             'meta_cognitive_features': meta_cognitive_output
         }
         
-        # Add GraphBrain outputs if used
-        if self.use_graphbrain and graph_enhanced_states is not None:
+        # Add Semantic Graph outputs if used
+        if self.use_semantic_graphs and graph_enhanced_states is not None:
             outputs['graph_outputs'] = {
                 'enhanced_states': graph_enhanced_states,
                 'ethical_relations': graph_outputs.get('ethical_relations', [])
@@ -273,21 +323,27 @@ class EnhancedEthicsModel(nn.Module):
         Generate a human-readable summary of the ethics analysis.
         
         Args:
-            outputs: Raw model outputs
+            outputs: Raw model outputs (kann auch Tensoren mit Batch-Dimension enthalten)
             
         Returns:
-            Summarized ethics analysis
+            Summarized ethics analysis (alle Werte als Skalar, ggf. gemittelt)
         """
+        def _to_scalar(val):
+            if hasattr(val, 'mean'):
+                return val.mean().item()
+            if hasattr(val, 'item'):
+                return val.item()
+            return val
         summary = {
-            'overall_ethics_score': outputs['ethics_score'].item(),
-            'manipulation_risk': outputs['manipulation_score'].item(),
-            'dominant_framework': self._get_dominant_framework(outputs['framework_analysis']),
-            'emotional_intensity': outputs['intuition_analysis']['emotional_intensity'].mean().item(),
-            'system_conflict': self._calculate_system_conflict(outputs['dual_process_analysis']),
-            'main_manipulation_techniques': self._identify_top_manipulation_techniques(outputs['manipulation_analysis']),
-            'cognitive_dissonance_level': outputs['dissonance_analysis']['dissonance_score'].mean().item(),
-            'framing_strength': outputs['framing_analysis']['framing_strength'].mean().item(),
-            'propaganda_risk': outputs['propaganda_analysis']['intensity_score'].mean().item()
+            'overall_ethics_score': _to_scalar(outputs['ethics_score']),
+            'manipulation_risk': _to_scalar(outputs['manipulation_score']),
+            'dominant_framework': self._get_dominant_framework(outputs.get('framework_analysis', {})),
+            'emotional_intensity': _to_scalar(outputs.get('intuition_analysis', {}).get('emotional_intensity', 0)),
+            'system_conflict': self._calculate_system_conflict(outputs.get('dual_process_analysis', {})),
+            'main_manipulation_techniques': self._identify_top_manipulation_techniques(outputs.get('manipulation_analysis', {})),
+            'cognitive_dissonance_level': _to_scalar(outputs.get('dissonance_analysis', {}).get('dissonance_score', 0)),
+            'framing_strength': _to_scalar(outputs.get('framing_analysis', {}).get('framing_strength', 0)),
+            'propaganda_risk': _to_scalar(outputs.get('propaganda_analysis', {}).get('intensity_score', 0)),
         }
         
         # Add semantic graph insights if available
@@ -347,7 +403,7 @@ class EthicsModel(EnhancedEthicsModel):
     
     def __init__(self, *args, **kwargs):
         # Explicitly disable new features by default
-        kwargs['use_graphbrain'] = kwargs.get('use_graphbrain', False)
+        kwargs['use_semantic_graphs'] = kwargs.get('use_semantic_graphs', False)
         super().__init__(*args, **kwargs)
 
 
@@ -363,7 +419,7 @@ def create_ethics_model(config: Dict[str, Any]) -> Union[EthicsModel, EnhancedEt
         Initialized model instance (EthicsModel or EnhancedEthicsModel)
     """
     use_enhanced = config.get('use_enhanced', True)  # Default to enhanced model
-    use_graphbrain = config.get('use_graphbrain', True)  # Default to using GraphBrain
+    use_semantic_graphs = config.get('use_semantic_graphs', True)  # Default to using semantic graphs
     use_legacy = config.get('use_legacy', False)  # New option to force legacy model
     
     # Determine which model class to use
@@ -381,8 +437,8 @@ def create_ethics_model(config: Dict[str, Any]) -> Union[EthicsModel, EnhancedEt
         max_seq_length=config.get('max_seq_length', 512),
         activation=config.get('activation', "gelu"),
         use_gnn=config.get('use_gnn', True),
-        use_graphbrain=use_graphbrain,
-        parser_lang=config.get('parser_lang', "en")
+        use_semantic_graphs=use_semantic_graphs,
+        spacy_model=config.get('spacy_model', "en_core_web_sm")
     )
 
 
@@ -399,8 +455,8 @@ if __name__ == "__main__":
         'activation': "gelu",
         'use_gnn': True,
         'use_enhanced': True,
-        'use_graphbrain': True,
-        'parser_lang': "en"
+        'use_semantic_graphs': True,
+        'spacy_model': "en_core_web_sm"
     }
     
     # Create model

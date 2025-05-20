@@ -1,6 +1,6 @@
 # EthicsModel
 
-A modern, modular PyTorch framework for ethical text analysis, manipulation detection, and narrative understanding. Supports integration with LLM embeddings (e.g., Huggingface Transformers), GraphBrain semantic hypergraphs, and Graph Neural Networks (GNNs, e.g., torch-geometric). Features explainability, uncertainty quantification, and advanced graph-based reasoning with comprehensive visualizations using Plotly Express.
+A modern, modular PyTorch framework for ethical text analysis, manipulation detection, and narrative understanding. Supports integration with LLM embeddings (e.g., Huggingface Transformers) and Graph Neural Networks (GNNs, e.g., torch-geometric). Uses NetworkX and spaCy for ethical relationship extraction and graph-based reasoning with comprehensive visualizations.
 
 ---
 
@@ -25,7 +25,7 @@ uv sync --extra full
   - Install the latest bitsandbytes wheel for your platform
   - Print `Done.` when finished
 
-**3. Install SpaCy language model for GraphBrain:**
+**3. Install spaCy language model:**
 ```bash
 python -m spacy download en_core_web_sm
 ```
@@ -94,8 +94,9 @@ We've added Docker support to make development easier and more consistent across
 - **Decision Support**: Identify cases requiring human intervention based on uncertainty
 
 ### 3. Advanced Graph Reasoning
-- **Ethical Relation Extraction**: Extract ethical concepts, actors, actions, and relationships
+- **Ethical Relation Extraction**: Extract ethical concepts, actors, actions, and relationships using spaCy
 - **Graph Neural Networks**: Process ethical relationships using specialized GNNs
+- **NetworkX Integration**: Build and analyze ethical relationship graphs
 - **Moral Foundation Analysis**: Map ethical judgments to underlying moral foundations
 - **Ethical Graph Visualization**: Interactive exploration of ethical relationship graphs
 
@@ -104,7 +105,7 @@ We've added Docker support to make development easier and more consistent across
 ## Features
 - Modular architecture for ethical reasoning and manipulation detection
 - LLM embedding support (e.g., GPT-2, Gemma, etc.)
-- GraphBrain integration for semantic hypergraph analysis
+- NetworkX and spaCy integration for ethical relationship extraction
 - Graph Neural Networks (GNNs) for relational reasoning
 - Modern activation functions (GELU, ReCA, etc.)
 - Multi-task loss, augmentation, and real dataset support
@@ -146,9 +147,9 @@ python examples/enhanced_model_showcase.py \
 | Module | Main Components | Purpose |
 |--------|----------------|---------|
 | `model.py` | `EnhancedEthicsModel` | Core architecture with GraphBrain integration |
-| `explainability.py` | `EthicsExplainer`, `AttentionVisualizer` | Explaining model decisions |
+| `explainability.py` | `EthicsExplainer`, `AttentionVisualizer`, `GraphExplainer` | Explaining model decisions using NetworkX and spaCy |
 | `uncertainty.py` | `UncertaintyEthicsModel`, `UncertaintyVisualizer` | Quantifying prediction uncertainty |
-| `graph_reasoning.py` | `GraphReasoningEthicsModel`, `EthicalRelationExtractor` | Advanced ethical relationship reasoning |
+| `graph_reasoning.py` | `GraphReasoningEthicsModel`, `EthicalRelationExtractor` | Advanced ethical relationship reasoning using NetworkX and spaCy |
 | `ethics_dataset.py` | `ETHICSDataset`, `ETHICSMultiDomainDataset` | ETHICS dataset integration with Polars |
 | `cuda_training.py` | `CUDAGraphTrainer` | Optimized training with CUDA Graphs and Streams |
 

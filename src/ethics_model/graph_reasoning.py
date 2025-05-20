@@ -2,8 +2,8 @@
 Advanced Graph-Based Ethical Reasoning
 
 This module provides advanced graph reasoning capabilities for ethical analysis,
-integrating GraphBrain semantic hypergraphs with PyTorch Geometric GNNs
-for improved understanding of ethical relationships.
+using NetworkX graphs and spaCy for NLP processing to understand
+ethical relationships and dependencies in text.
 """
 
 import torch
@@ -11,313 +11,427 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any, Union, Set
-import graphbrain as gb
-from graphbrain import hgraph
+import networkx as nx
+import spacy
+from spacy.tokens import Doc, Token, Span
 import torch_geometric
 from torch_geometric.nn import GCNConv, GATConv, GINConv, SAGEConv, TransformerConv
 from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
 from torch_geometric.data import Data, Batch
-import plotly.graph_objects as go
-import plotly.express as px
 
 
 class EthicalRelationExtractor:
     """
-    Extracts ethical relations from text using GraphBrain.
+    Extracts ethical relations from text using spaCy NLP pipeline.
     
     This class analyzes text to identify ethical concepts, actors, actions,
-    and their relationships in a structured format suitable for graph processing.
+    and their relationships using dependency parsing and named entity recognition.
     
     Args:
-        parser_lang: Language for GraphBrain parser
+        model_name: spaCy model name (e.g., "en_core_web_sm")
     """
     
-    def __init__(self, parser_lang: str = "en"):
-        # Initialize GraphBrain parser
+    def __init__(self, model_name: str = "en_core_web_sm"):
         try:
-            self.parser = gb.Parser(model=f"{parser_lang}_core_web_sm")
-        except Exception as e:
-            print(f"Error initializing GraphBrain parser: {e}")
-            self.parser = None
+            self.nlp = spacy.load(model_name)
+        except OSError:
+            print(f"Warning: Could not load spaCy model '{model_name}'. "
+                  f"Please install with: python -m spacy download {model_name}")
+            # Create a blank model as fallback
+            self.nlp = spacy.blank("en")
         
         # Ethical concept dictionaries
         self.moral_actions = {
             "positive": ["help", "assist", "support", "protect", "save", "benefit", 
-                         "contribute", "donate", "volunteer", "share", "cooperate"],
+                         "contribute", "donate", "volunteer", "share", "cooperate", "aid",
+                         "care", "nurture", "heal", "teach", "guide", "encourage"],
             "negative": ["harm", "hurt", "damage", "destroy", "kill", "injure", "steal", 
-                         "cheat", "lie", "deceive", "manipulate", "exploit"]
+                         "cheat", "lie", "deceive", "manipulate", "exploit", "abuse",
+                         "betray", "abandon", "neglect", "oppress", "discriminate"]
         }
         
         self.moral_values = {
-            "care": ["care", "compassion", "kindness", "empathy", "sympathy", "help"],
-            "fairness": ["fair", "just", "equal", "equitable", "rights", "deserve"],
-            "loyalty": ["loyal", "faithful", "committed", "patriotic", "solidarity"],
-            "authority": ["respect", "obedient", "tradition", "honor", "duty"],
-            "purity": ["pure", "sacred", "natural", "clean", "innocent"],
-            "liberty": ["freedom", "liberty", "autonomy", "choice", "independence"]
+            "care": ["care", "compassion", "kindness", "empathy", "sympathy", "help", 
+                     "nurture", "welfare", "wellbeing", "concern"],
+            "fairness": ["fair", "just", "equal", "equitable", "rights", "deserve",
+                         "justice", "equality", "impartial", "unbiased"],
+            "loyalty": ["loyal", "faithful", "committed", "patriotic", "solidarity",
+                        "devotion", "allegiance", "unity", "brotherhood"],
+            "authority": ["respect", "obedient", "tradition", "honor", "duty",
+                          "hierarchy", "leadership", "order", "discipline"],
+            "purity": ["pure", "sacred", "natural", "clean", "innocent",
+                       "sanctity", "divine", "holy", "pristine"],
+            "liberty": ["freedom", "liberty", "autonomy", "choice", "independence",
+                        "self-determination", "rights", "sovereignty"]
         }
         
-        self.consequences = {
-            "positive": ["benefit", "advantage", "gain", "profit", "reward", "improvement"],
-            "negative": ["harm", "damage", "loss", "cost", "penalty", "deterioration"]
+        self.emotional_indicators = {
+            "positive": ["happy", "joy", "love", "hope", "grateful", "proud", "satisfied",
+                         "excited", "pleased", "content", "optimistic"],
+            "negative": ["angry", "sad", "fear", "hate", "disgusted", "ashamed", "guilty",
+                         "anxious", "worried", "frustrated", "disappointed"]
         }
+        
+        # Moral entities - types that carry moral weight
+        self.moral_entities = ["PERSON", "ORG", "GPE", "NORP"]  # People, organizations, places, groups
     
-    def _get_graph(self, text: str) -> Optional[hgraph]:
-        """Parse text to GraphBrain hypergraph."""
-        if self.parser is None:
-            return None
+    def _categorize_word(self, word: str, pos: str = None) -> Tuple[bool, str, str]:
+        """
+        Categorize a word for moral significance.
+        
+        Args:
+            word: The word to categorize
+            pos: Part of speech tag
             
-        try:
-            hg = hgraph()
-            
-            for sentence in text.split('.'):
-                if sentence.strip():
-                    parse = self.parser.parse(sentence)
-                    hg.add(parse)
-                    
-            return hg
-        except Exception as e:
-            print(f"Error parsing text: {e}")
-            return None
-    
-    def is_moral_word(self, word: str) -> Tuple[bool, str]:
-        """Check if a word has moral connotations."""
+        Returns:
+            Tuple of (is_moral, category, sentiment)
+        """
         word_lower = word.lower()
         
-        # Check actions
-        for category, words in self.moral_actions.items():
-            if any(moral_word in word_lower for moral_word in words):
-                return True, f"action_{category}"
+        # Check moral actions
+        for sentiment, actions in self.moral_actions.items():
+            if any(action in word_lower for action in actions):
+                return True, "action", sentiment
         
-        # Check values
+        # Check moral values
         for value, words in self.moral_values.items():
             if any(moral_word in word_lower for moral_word in words):
-                return True, f"value_{value}"
+                return True, f"value_{value}", "neutral"
         
-        # Check consequences
-        for category, words in self.consequences.items():
-            if any(consequence in word_lower for consequence in words):
-                return True, f"consequence_{category}"
+        # Check emotional indicators
+        for sentiment, emotions in self.emotional_indicators.items():
+            if any(emotion in word_lower for emotion in emotions):
+                return True, "emotion", sentiment
         
-        return False, ""
+        return False, "neutral", "neutral"
+    
+    def _extract_dependencies(self, doc: Doc) -> List[Tuple[str, str, str]]:
+        """Extract dependency relationships from spaCy doc."""
+        dependencies = []
+        
+        for token in doc:
+            if token.dep_ in ["nsubj", "nsubjpass", "dobj", "iobj", "pobj", "amod", "compound"]:
+                head_text = token.head.text.lower()
+                token_text = token.text.lower()
+                
+                # Check if either token or head has moral significance
+                token_moral = self._categorize_word(token_text, token.pos_)
+                head_moral = self._categorize_word(head_text, token.head.pos_)
+                
+                if token_moral[0] or head_moral[0]:
+                    dependencies.append((head_text, token.dep_, token_text))
+        
+        return dependencies
+    
+    def _extract_entities(self, doc: Doc) -> Dict[str, List[Tuple[str, str]]]:
+        """Extract and categorize entities from text."""
+        entities = {
+            "actors": [],
+            "actions": [],
+            "values": [],
+            "emotions": [],
+            "locations": [],
+            "organizations": []
+        }
+        
+        # Named entities
+        for ent in doc.ents:
+            if ent.label_ in self.moral_entities:
+                if ent.label_ == "PERSON":
+                    entities["actors"].append((ent.text, "person"))
+                elif ent.label_ == "ORG":
+                    entities["organizations"].append((ent.text, "organization"))
+                elif ent.label_ in ["GPE", "LOC"]:
+                    entities["locations"].append((ent.text, "location"))
+                elif ent.label_ == "NORP":
+                    entities["actors"].append((ent.text, "group"))
+        
+        # Categorize tokens by moral significance
+        for token in doc:
+            if not token.is_stop and not token.is_punct and len(token.text) > 2:
+                is_moral, category, sentiment = self._categorize_word(token.text, token.pos_)
+                
+                if is_moral:
+                    if category == "action":
+                        entities["actions"].append((token.text, sentiment))
+                    elif category.startswith("value_"):
+                        value_type = category.split("_")[1]
+                        entities["values"].append((token.text, value_type))
+                    elif category == "emotion":
+                        entities["emotions"].append((token.text, sentiment))
+        
+        return entities
+    
+    def create_graph(self, text: str) -> nx.DiGraph:
+        """
+        Create a NetworkX graph from the input text.
+        
+        Args:
+            text: Input text to analyze
+            
+        Returns:
+            NetworkX directed graph representing ethical relationships
+        """
+        doc = self.nlp(text)
+        
+        # Create directed graph
+        graph = nx.DiGraph()
+        
+        # Extract entities and dependencies
+        entities = self._extract_entities(doc)
+        dependencies = self._extract_dependencies(doc)
+        
+        # Add nodes with attributes
+        node_id = 0
+        node_mapping = {}
+        
+        # Add entity nodes
+        for entity_type, entity_list in entities.items():
+            for entity, subtype in entity_list:
+                if entity not in node_mapping:
+                    node_mapping[entity] = node_id
+                    graph.add_node(node_id, 
+                                   text=entity, 
+                                   type=entity_type, 
+                                   subtype=subtype,
+                                   moral_weight=self._calculate_moral_weight(entity, entity_type))
+                    node_id += 1
+        
+        # Add edges from dependencies
+        for head, relation, dependent in dependencies:
+            if head in node_mapping and dependent in node_mapping:
+                head_id = node_mapping[head]
+                dep_id = node_mapping[dependent]
+                
+                graph.add_edge(head_id, dep_id, 
+                               relation=relation,
+                               weight=self._calculate_edge_weight(head, dependent, relation))
+        
+        # Add co-occurrence edges for entities in the same sentence
+        for sent in doc.sents:
+            sent_entities = []
+            for token in sent:
+                if token.text in node_mapping:
+                    sent_entities.append(node_mapping[token.text])
+            
+            # Connect entities that appear together
+            for i, entity1 in enumerate(sent_entities):
+                for entity2 in sent_entities[i+1:]:
+                    if not graph.has_edge(entity1, entity2):
+                        graph.add_edge(entity1, entity2, 
+                                       relation="co_occurrence",
+                                       weight=0.5)
+        
+        return graph
+    
+    def _calculate_moral_weight(self, text: str, entity_type: str) -> float:
+        """Calculate the moral significance of an entity."""
+        is_moral, category, sentiment = self._categorize_word(text)
+        
+        if not is_moral:
+            return 0.1
+        
+        # Base weight by category
+        base_weights = {
+            "action": 0.8,
+            "value_care": 0.9,
+            "value_fairness": 0.9,
+            "value_loyalty": 0.7,
+            "value_authority": 0.6,
+            "value_purity": 0.6,
+            "value_liberty": 0.8,
+            "emotion": 0.5
+        }
+        
+        weight = base_weights.get(category, 0.3)
+        
+        # Sentiment modifier
+        if sentiment == "positive":
+            weight *= 1.2
+        elif sentiment == "negative":
+            weight *= 1.5  # Negative actions often more morally significant
+        
+        return min(weight, 1.0)
+    
+    def _calculate_edge_weight(self, source: str, target: str, relation: str) -> float:
+        """Calculate the weight of a relationship edge."""
+        # Weight by dependency relation type
+        relation_weights = {
+            "nsubj": 0.9,      # Subject relationship
+            "nsubjpass": 0.9,   # Passive subject
+            "dobj": 0.8,        # Direct object
+            "iobj": 0.7,        # Indirect object
+            "amod": 0.6,        # Adjectival modifier
+            "compound": 0.5,    # Compound
+            "co_occurrence": 0.3
+        }
+        
+        base_weight = relation_weights.get(relation, 0.4)
+        
+        # Boost weight if both entities are morally significant
+        source_moral = self._categorize_word(source)[0]
+        target_moral = self._categorize_word(target)[0]
+        
+        if source_moral and target_moral:
+            base_weight *= 1.5
+        
+        return min(base_weight, 1.0)
     
     def extract_relations(self, text: str) -> Dict[str, Any]:
         """
-        Extract ethical relations from text.
+        Extract ethical relations and return them in a structured format.
         
         Args:
             text: Input text
             
         Returns:
-            Dictionary of ethical relations
+            Dictionary containing extracted ethical relations
         """
-        hg = self._get_graph(text)
-        if hg is None:
-            return {"error": "Failed to parse text"}
+        # Create graph
+        graph = self.create_graph(text)
         
-        # Extract entities and relations
+        # Extract structured information
         entities = {
-            "actors": set(),
-            "actions": set(),
-            "values": set(),
-            "consequences": set()
+            "actors": [],
+            "actions": [],
+            "values": [],
+            "emotions": [],
+            "locations": [],
+            "organizations": []
         }
         
         relations = []
         
-        # Process all edges in the graph
-        for edge in hg.edges():
-            if len(edge) <= 1:
-                continue
-                
-            # Extract predicate (action)
-            if gb.is_atom(edge[0]):
-                predicate = str(edge[0])
-                
-                # Check if the predicate has moral connotations
-                is_moral, moral_type = self.is_moral_word(predicate)
-                
-                if is_moral:
-                    if moral_type.startswith("action_"):
-                        entities["actions"].add((predicate, moral_type.split("_")[1]))
-                    elif moral_type.startswith("value_"):
-                        entities["values"].add((predicate, moral_type.split("_")[1]))
-                    elif moral_type.startswith("consequence_"):
-                        entities["consequences"].add((predicate, moral_type.split("_")[1]))
-                else:
-                    entities["actions"].add((predicate, "neutral"))
-                
-                # Extract subject (actor)
-                if len(edge) > 1 and gb.is_atom(edge[1]):
-                    subject = str(edge[1])
-                    entities["actors"].add(subject)
-                    
-                    # Add relation between actor and action
-                    relations.append({
-                        "source": subject,
-                        "relation": predicate,
-                        "target": "",
-                        "type": "actor_action"
-                    })
-                
-                # Extract object
-                if len(edge) > 2:
-                    for i in range(2, len(edge)):
-                        if gb.is_atom(edge[i]):
-                            obj = str(edge[i])
-                            
-                            # Check if object has moral connotations
-                            is_moral_obj, moral_type_obj = self.is_moral_word(obj)
-                            
-                            if is_moral_obj:
-                                if moral_type_obj.startswith("value_"):
-                                    entities["values"].add((obj, moral_type_obj.split("_")[1]))
-                                elif moral_type_obj.startswith("consequence_"):
-                                    entities["consequences"].add((obj, moral_type_obj.split("_")[1]))
-                            
-                            # Add relation between action and object
-                            relations.append({
-                                "source": predicate,
-                                "relation": "affects",
-                                "target": obj,
-                                "type": "action_object"
-                            })
+        # Process nodes
+        for node_id, node_data in graph.nodes(data=True):
+            entity_type = node_data.get("type", "unknown")
+            entity_text = node_data.get("text", "")
+            entity_subtype = node_data.get("subtype", "")
+            
+            if entity_type in entities:
+                entities[entity_type].append((entity_text, entity_subtype))
         
-        # Convert sets to lists
-        result = {
-            "actors": list(entities["actors"]),
-            "actions": list(entities["actions"]),
-            "values": list(entities["values"]),
-            "consequences": list(entities["consequences"]),
-            "relations": relations
+        # Process edges
+        for source, target, edge_data in graph.edges(data=True):
+            source_text = graph.nodes[source].get("text", "")
+            target_text = graph.nodes[target].get("text", "")
+            relation_type = edge_data.get("relation", "")
+            
+            relations.append({
+                "source": source_text,
+                "target": target_text,
+                "relation": relation_type,
+                "weight": edge_data.get("weight", 0.5)
+            })
+        
+        return {
+            "entities": entities,
+            "relations": relations,
+            "graph": graph,
+            "n_nodes": graph.number_of_nodes(),
+            "n_edges": graph.number_of_edges()
         }
-        
-        return result
     
     def to_pyg_data(self, relations: Dict[str, Any]) -> Data:
         """
         Convert extracted relations to PyTorch Geometric Data object.
         
         Args:
-            relations: Dictionary of ethical relations
+            relations: Dictionary of ethical relations from extract_relations
             
         Returns:
             PyTorch Geometric Data object
         """
-        # Build node dictionary
-        nodes = []
-        node_types = []
+        graph = relations["graph"]
+        
+        if graph.number_of_nodes() == 0:
+            # Return empty graph
+            return Data(
+                x=torch.zeros((1, 6), dtype=torch.float),
+                edge_index=torch.zeros((2, 0), dtype=torch.long),
+                edge_attr=torch.zeros((0, 2), dtype=torch.float),
+                num_nodes=1
+            )
+        
+        # Create node features
         node_features = []
+        node_list = list(graph.nodes())
         
-        # Add actors
-        for actor in relations["actors"]:
-            nodes.append(actor)
-            node_types.append(0)  # Type 0: Actor
-            node_features.append([1, 0, 0, 0])  # One-hot encoded type
-        
-        # Add actions
-        for action, sentiment in relations["actions"]:
-            nodes.append(action)
-            node_types.append(1)  # Type 1: Action
+        for node_id in node_list:
+            node_data = graph.nodes[node_id]
             
-            # Feature: [is_actor, is_action, is_value, is_consequence]
-            feature = [0, 1, 0, 0]
+            # Feature vector: [type_one_hot(4), moral_weight(1), sentiment(1)]
+            feature = [0, 0, 0, 0]  # [actor, action, value, other]
             
-            # Add sentiment information
-            if sentiment == "positive":
-                feature.append(1)
-            elif sentiment == "negative":
-                feature.append(-1)
+            node_type = node_data.get("type", "unknown")
+            if node_type in ["actors", "organizations"]:
+                feature[0] = 1
+            elif node_type == "actions":
+                feature[1] = 1
+            elif node_type == "values":
+                feature[2] = 1
             else:
-                feature.append(0)
-                
-            node_features.append(feature)
-        
-        # Add values
-        for value, category in relations["values"]:
-            nodes.append(value)
-            node_types.append(2)  # Type 2: Value
+                feature[3] = 1
             
-            # One-hot encoded type with additional dimension for sentiment
-            feature = [0, 0, 1, 0, 0]  # Neutral sentiment by default
-            node_features.append(feature)
-        
-        # Add consequences
-        for consequence, sentiment in relations["consequences"]:
-            nodes.append(consequence)
-            node_types.append(3)  # Type 3: Consequence
+            # Add moral weight
+            moral_weight = node_data.get("moral_weight", 0.0)
+            feature.append(moral_weight)
             
-            # Base feature
-            feature = [0, 0, 0, 1]
-            
-            # Add sentiment information
-            if sentiment == "positive":
-                feature.append(1)
-            elif sentiment == "negative":
-                feature.append(-1)
+            # Add sentiment encoding
+            subtype = node_data.get("subtype", "neutral")
+            if subtype == "positive":
+                sentiment = 1.0
+            elif subtype == "negative":
+                sentiment = -1.0
             else:
-                feature.append(0)
-                
+                sentiment = 0.0
+            feature.append(sentiment)
+            
             node_features.append(feature)
         
-        # Create node index mapping
-        node_map = {node: i for i, node in enumerate(nodes)}
-        
-        # Create edges
+        # Create edge indices and attributes
         edge_indices = []
-        edge_types = []
+        edge_attributes = []
         
-        for relation in relations["relations"]:
-            source = relation["source"]
-            target = relation["target"]
-            
-            # Skip if nodes not in map
-            if source not in node_map or (target and target not in node_map):
-                continue
-            
-            source_idx = node_map[source]
-            
-            if target:
-                target_idx = node_map[target]
-                
-                # Add bidirectional edges
-                edge_indices.append((source_idx, target_idx))
-                edge_indices.append((target_idx, source_idx))
-                
-                # Edge types
-                if relation["type"] == "actor_action":
-                    edge_types.extend([0, 0])  # Type 0: Actor-Action
-                elif relation["type"] == "action_object":
-                    edge_types.extend([1, 1])  # Type 1: Action-Object
-                else:
-                    edge_types.extend([2, 2])  # Type 2: Other
+        node_id_to_idx = {node_id: idx for idx, node_id in enumerate(node_list)}
         
-        # Convert to PyTorch tensors
+        for source, target, edge_data in graph.edges(data=True):
+            source_idx = node_id_to_idx[source]
+            target_idx = node_id_to_idx[target]
+            
+            # Add both directions for undirected graph representation
+            edge_indices.extend([[source_idx, target_idx], [target_idx, source_idx]])
+            
+            # Edge attributes: [weight, relation_type_encoded]
+            weight = edge_data.get("weight", 0.5)
+            
+            # Encode relation type
+            relation = edge_data.get("relation", "unknown")
+            relation_encoding = {
+                "nsubj": 1.0, "nsubjpass": 0.9, "dobj": 0.8,
+                "iobj": 0.7, "amod": 0.6, "compound": 0.5,
+                "co_occurrence": 0.3
+            }.get(relation, 0.4)
+            
+            edge_attr = [weight, relation_encoding]
+            edge_attributes.extend([edge_attr, edge_attr])  # For both directions
+        
+        # Convert to tensors
+        x = torch.tensor(node_features, dtype=torch.float)
+        
         if edge_indices:
             edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-            edge_type = torch.tensor(edge_types, dtype=torch.long)
+            edge_attr = torch.tensor(edge_attributes, dtype=torch.float)
         else:
-            # Empty graph fallback
             edge_index = torch.zeros((2, 0), dtype=torch.long)
-            edge_type = torch.zeros(0, dtype=torch.long)
+            edge_attr = torch.zeros((0, 2), dtype=torch.float)
         
-        # Node features and types
-        x = torch.tensor(node_features, dtype=torch.float)
-        node_type = torch.tensor(node_types, dtype=torch.long)
-        
-        # Create Data object
-        data = Data(
+        return Data(
             x=x,
             edge_index=edge_index,
-            edge_type=edge_type,
-            node_type=node_type,
-            num_nodes=len(nodes)
+            edge_attr=edge_attr,
+            num_nodes=len(node_list)
         )
-        
-        # Add original nodes for reference
-        data.nodes = nodes
-        
-        return data
 
 
 class EthicalGNN(nn.Module):
@@ -338,7 +452,7 @@ class EthicalGNN(nn.Module):
     
     def __init__(
         self,
-        in_channels: int = 5,
+        in_channels: int = 6,
         hidden_channels: int = 64,
         out_channels: int = 32,
         num_layers: int = 3,
@@ -349,19 +463,17 @@ class EthicalGNN(nn.Module):
         
         self.num_layers = num_layers
         self.dropout = dropout
+        self.conv_type = conv_type
         
         # Node embedding layer
         self.node_encoder = nn.Linear(in_channels, hidden_channels)
         
-        # Edge embedding
-        self.edge_embedding = nn.Embedding(3, hidden_channels)  # 3 edge types
+        # Edge embedding - using edge attributes directly
+        self.edge_encoder = nn.Linear(2, hidden_channels) if conv_type == "gat" else None
         
         # Graph convolution layers
         self.convs = nn.ModuleList()
         self.batch_norms = nn.ModuleList()
-        
-        # Choose convolution type
-        self.conv_type = conv_type
         
         for i in range(num_layers):
             in_dim = hidden_channels
@@ -370,7 +482,7 @@ class EthicalGNN(nn.Module):
             if conv_type == "gcn":
                 conv = GCNConv(in_dim, out_dim)
             elif conv_type == "gat":
-                conv = GATConv(in_dim, out_dim, heads=4, concat=False)
+                conv = GATConv(in_dim, out_dim, heads=4, concat=False, edge_dim=hidden_channels)
             elif conv_type == "gin":
                 nn_layer = nn.Sequential(
                     nn.Linear(in_dim, hidden_channels),
@@ -381,7 +493,7 @@ class EthicalGNN(nn.Module):
             elif conv_type == "sage":
                 conv = SAGEConv(in_dim, out_dim)
             elif conv_type == "transformer":
-                conv = TransformerConv(in_dim, out_dim, heads=4, concat=False)
+                conv = TransformerConv(in_dim, out_dim, heads=4, concat=False, edge_dim=hidden_channels)
             else:
                 raise ValueError(f"Unknown convolution type: {conv_type}")
                 
@@ -405,14 +517,6 @@ class EthicalGNN(nn.Module):
             nn.Sigmoid()
         )
         
-        # Sentiment analysis for actions/consequences
-        self.sentiment_classifier = nn.Sequential(
-            nn.Linear(out_channels, out_channels // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(out_channels // 2, 3)  # 3 classes: negative, neutral, positive
-        )
-        
         # Moral foundation classifier
         self.moral_foundation_classifier = nn.Sequential(
             nn.Linear(out_channels, out_channels // 2),
@@ -432,14 +536,22 @@ class EthicalGNN(nn.Module):
             Dictionary of model outputs
         """
         x, edge_index = data.x, data.edge_index
+        edge_attr = getattr(data, 'edge_attr', None)
         
         # Initial node encoding
         x = self.node_encoder(x)
         
+        # Process edge attributes if available and needed
+        if edge_attr is not None and self.edge_encoder is not None:
+            edge_attr = self.edge_encoder(edge_attr)
+        
         # Apply graph convolutions
         for i in range(self.num_layers):
             # Apply convolution
-            x = self.convs[i](x, edge_index)
+            if self.conv_type in ["gat", "transformer"] and edge_attr is not None:
+                x = self.convs[i](x, edge_index, edge_attr=edge_attr)
+            else:
+                x = self.convs[i](x, edge_index)
             
             # Apply batch normalization
             x = self.batch_norms[i](x)
@@ -450,7 +562,7 @@ class EthicalGNN(nn.Module):
                 x = F.dropout(x, p=self.dropout, training=self.training)
         
         # Global pooling
-        if hasattr(data, 'batch'):
+        if hasattr(data, 'batch') and data.batch is not None:
             # If batched, use global pooling
             node_embeddings = x
             
@@ -470,51 +582,17 @@ class EthicalGNN(nn.Module):
         ethics_score = self.ethics_scorer(graph_embedding)
         manipulation_score = self.manipulation_scorer(graph_embedding)
         
-        # Node-level analysis
-        if hasattr(data, 'node_type'):
-            # Get node types
-            node_types = data.node_type
-            
-            # Group nodes by type
-            actors_mask = node_types == 0
-            actions_mask = node_types == 1
-            values_mask = node_types == 2
-            consequences_mask = node_types == 3
-            
-            # Analysis by node type
-            actor_embeddings = node_embeddings[actors_mask] if torch.any(actors_mask) else None
-            action_embeddings = node_embeddings[actions_mask] if torch.any(actions_mask) else None
-            value_embeddings = node_embeddings[values_mask] if torch.any(values_mask) else None
-            consequence_embeddings = node_embeddings[consequences_mask] if torch.any(consequences_mask) else None
-            
-            # Sentiment analysis for actions
-            action_sentiments = None
-            if action_embeddings is not None and len(action_embeddings) > 0:
-                action_sentiments = self.sentiment_classifier(action_embeddings)
-            
-            # Moral foundation analysis for values
-            moral_foundations = None
-            if value_embeddings is not None and len(value_embeddings) > 0:
-                moral_foundations = self.moral_foundation_classifier(value_embeddings)
+        # Moral foundation analysis
+        moral_foundations = self.moral_foundation_classifier(graph_embedding)
         
         # Compile results
         results = {
             'node_embeddings': node_embeddings,
             'graph_embedding': graph_embedding,
             'ethics_score': ethics_score,
-            'manipulation_score': manipulation_score
+            'manipulation_score': manipulation_score,
+            'moral_foundations': moral_foundations
         }
-        
-        # Add node-level analysis if available
-        if hasattr(data, 'node_type'):
-            results.update({
-                'actor_embeddings': actor_embeddings,
-                'action_embeddings': action_embeddings,
-                'value_embeddings': value_embeddings,
-                'consequence_embeddings': consequence_embeddings,
-                'action_sentiments': action_sentiments,
-                'moral_foundations': moral_foundations
-            })
         
         return results
 
@@ -533,7 +611,7 @@ class EthicalRelationReasoning(nn.Module):
         gnn_num_layers: Number of GNN layers
         gnn_conv_type: Type of GNN convolution
         dropout: Dropout rate
-        parser_lang: Language for GraphBrain parser
+        spacy_model: spaCy model name
     """
     
     def __init__(
@@ -544,16 +622,16 @@ class EthicalRelationReasoning(nn.Module):
         gnn_num_layers: int = 3,
         gnn_conv_type: str = "gat",
         dropout: float = 0.3,
-        parser_lang: str = "en"
+        spacy_model: str = "en_core_web_sm"
     ):
         super().__init__()
         
         # Relation extractor
-        self.relation_extractor = EthicalRelationExtractor(parser_lang)
+        self.relation_extractor = EthicalRelationExtractor(spacy_model)
         
         # Ethical GNN
         self.gnn = EthicalGNN(
-            in_channels=5,  # Feature dimension from relation_extractor
+            in_channels=6,  # Feature dimension from relation_extractor
             hidden_channels=gnn_hidden_dim,
             out_channels=gnn_output_dim,
             num_layers=gnn_num_layers,
@@ -601,36 +679,49 @@ class EthicalRelationReasoning(nn.Module):
         # Process graphs with GNN
         if graph_data_list:
             # Create batch
-            batched_data = Batch.from_data_list(graph_data_list)
-            
-            # Run GNN
-            gnn_outputs = self.gnn(batched_data)
-            
-            # Get graph embeddings
-            graph_embeddings = gnn_outputs['graph_embedding']
-            
-            # Project to text embedding space
-            projected_graph_embeddings = self.graph_to_text(graph_embeddings)
-            
-            # Reshape for integration with text
-            projected_graph_embeddings = projected_graph_embeddings.view(batch_size, 1, -1)
-            projected_graph_embeddings = projected_graph_embeddings.expand(-1, text_embeddings.size(1), -1)
-            
-            # Integrate with text embeddings
-            combined_embeddings = torch.cat([text_embeddings, projected_graph_embeddings], dim=-1)
-            integrated_embeddings = self.integration(combined_embeddings)
-            
-            return {
-                'integrated_embeddings': integrated_embeddings,
-                'graph_embeddings': graph_embeddings,
-                'gnn_outputs': gnn_outputs
-            }
+            try:
+                batched_data = Batch.from_data_list(graph_data_list)
+                
+                # Run GNN
+                gnn_outputs = self.gnn(batched_data)
+                
+                # Get graph embeddings
+                graph_embeddings = gnn_outputs['graph_embedding']
+                
+                # Project to text embedding space
+                projected_graph_embeddings = self.graph_to_text(graph_embeddings)
+                
+                # Reshape for integration with text
+                if projected_graph_embeddings.dim() == 2:
+                    projected_graph_embeddings = projected_graph_embeddings.view(batch_size, 1, -1)
+                projected_graph_embeddings = projected_graph_embeddings.expand(-1, text_embeddings.size(1), -1)
+                
+                # Integrate with text embeddings
+                combined_embeddings = torch.cat([text_embeddings, projected_graph_embeddings], dim=-1)
+                integrated_embeddings = self.integration(combined_embeddings)
+                
+                return {
+                    'integrated_embeddings': integrated_embeddings,
+                    'graph_embeddings': graph_embeddings,
+                    'gnn_outputs': gnn_outputs,
+                    'graph_data': graph_data_list
+                }
+            except Exception as e:
+                print(f"Warning: Graph processing failed: {e}")
+                # Fallback to original embeddings
+                return {
+                    'integrated_embeddings': text_embeddings,
+                    'graph_embeddings': None,
+                    'gnn_outputs': None,
+                    'graph_data': None
+                }
         else:
             # If no graphs, return original embeddings
             return {
                 'integrated_embeddings': text_embeddings,
                 'graph_embeddings': None,
-                'gnn_outputs': None
+                'gnn_outputs': None,
+                'graph_data': None
             }
 
 
@@ -638,7 +729,7 @@ class GraphReasoningEthicsModel(nn.Module):
     """
     Enhanced ethics model with advanced graph-based reasoning.
     
-    This model incorporates GraphBrain-based ethical relation extraction
+    This model incorporates spaCy-based ethical relation extraction
     and PyTorch Geometric graph neural networks for deeper ethical analysis.
     
     Args:
@@ -648,7 +739,7 @@ class GraphReasoningEthicsModel(nn.Module):
         gnn_output_dim: Output dimension for GNN
         gnn_num_layers: Number of GNN layers
         gnn_conv_type: Type of GNN convolution
-        parser_lang: Language for GraphBrain parser
+        spacy_model: spaCy model name
     """
     
     def __init__(
@@ -659,7 +750,7 @@ class GraphReasoningEthicsModel(nn.Module):
         gnn_output_dim: int = 32,
         gnn_num_layers: int = 3,
         gnn_conv_type: str = "gat",
-        parser_lang: str = "en"
+        spacy_model: str = "en_core_web_sm"
     ):
         super().__init__()
         
@@ -672,7 +763,7 @@ class GraphReasoningEthicsModel(nn.Module):
             gnn_output_dim=gnn_output_dim,
             gnn_num_layers=gnn_num_layers,
             gnn_conv_type=gnn_conv_type,
-            parser_lang=parser_lang
+            spacy_model=spacy_model
         )
     
     def forward(
@@ -707,7 +798,7 @@ class GraphReasoningEthicsModel(nn.Module):
             embeddings = self.base_model.layer_norm(embeddings)
             embeddings = self.base_model.dropout(embeddings)
         
-        # Early transformer layers
+        # Early transformer layers (if available)
         if hasattr(self.base_model, 'transformer_layers'):
             for i, layer in enumerate(self.base_model.transformer_layers):
                 # Process first half of transformer layers
@@ -719,7 +810,7 @@ class GraphReasoningEthicsModel(nn.Module):
             reasoning_outputs = self.relation_reasoning(texts, embeddings)
             enhanced_embeddings = reasoning_outputs['integrated_embeddings']
             
-            # Process remaining transformer layers
+            # Process remaining transformer layers (if available)
             if hasattr(self.base_model, 'transformer_layers'):
                 for i, layer in enumerate(self.base_model.transformer_layers):
                     # Process second half of transformer layers
@@ -744,235 +835,175 @@ class GraphVisualizer:
     """
     Visualizes ethical relationship graphs for explainability.
     
-    This class creates interactive visualizations of ethical graphs
+    This class creates visualizations of ethical graphs using NetworkX
     to explain the reasoning process.
     """
     
     @staticmethod
     def visualize_ethical_graph(
-        relations: Dict[str, Any],
-        title: str = "Ethical Relationship Graph"
-    ) -> go.Figure:
+        graph: nx.DiGraph,
+        title: str = "Ethical Relationship Graph",
+        save_path: Optional[str] = None
+    ) -> None:
         """
-        Create an interactive visualization of ethical relationships.
+        Create a visualization of ethical relationships using matplotlib.
         
         Args:
-            relations: Dictionary of ethical relations
+            graph: NetworkX graph to visualize
             title: Plot title
-            
-        Returns:
-            Plotly figure with graph visualization
+            save_path: Optional path to save the figure
         """
-        # Extract nodes and edges
-        nodes = set()
-        node_types = {}
-        node_sentiments = {}
-        edges = []
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.patches as mpatches
+        except ImportError:
+            print("Matplotlib not available for visualization. Consider using Plotly instead.")
+            return
         
-        # Add actors
-        for actor in relations["actors"]:
-            nodes.add(actor)
-            node_types[actor] = "actor"
-            node_sentiments[actor] = "neutral"
-        
-        # Add actions
-        for action, sentiment in relations["actions"]:
-            nodes.add(action)
-            node_types[action] = "action"
-            node_sentiments[action] = sentiment
-        
-        # Add values
-        for value, category in relations["values"]:
-            nodes.add(value)
-            node_types[value] = f"value_{category}"
-            node_sentiments[value] = "neutral"
-        
-        # Add consequences
-        for consequence, sentiment in relations["consequences"]:
-            nodes.add(consequence)
-            node_types[consequence] = "consequence"
-            node_sentiments[consequence] = sentiment
-        
-        # Add edges
-        for relation in relations["relations"]:
-            source = relation["source"]
-            target = relation["target"]
-            relation_type = relation["type"]
-            
-            if source in nodes and (not target or target in nodes):
-                if target:
-                    edges.append((source, target, relation_type))
-        
-        # Convert nodes to list
-        nodes = list(nodes)
+        if graph.number_of_nodes() == 0:
+            print("Empty graph - nothing to visualize")
+            return
         
         # Create layout
-        layout = {}
+        pos = nx.spring_layout(graph, k=1, iterations=50)
         
-        # Use a circle layout
-        n = len(nodes)
-        for i, node in enumerate(nodes):
-            angle = 2 * np.pi * i / n
-            layout[node] = (np.cos(angle), np.sin(angle))
-        
-        # Color mapping
-        node_color_map = {
-            "actor": "blue",
-            "action": "red",
-            "consequence": "purple"
+        # Color mapping for node types
+        color_map = {
+            "actors": "lightblue",
+            "actions": "lightcoral", 
+            "values": "lightgreen",
+            "emotions": "lightyellow",
+            "locations": "lightpink",
+            "organizations": "lightgray"
         }
-        
-        # Add colors for value types
-        for foundation in ["care", "fairness", "loyalty", "authority", "purity", "liberty"]:
-            node_color_map[f"value_{foundation}"] = "green"
-        
-        # Edge color mapping
-        edge_color_map = {
-            "actor_action": "gray",
-            "action_object": "black"
-        }
-        
-        # Sentiment color modifiers
-        sentiment_colors = {
-            "positive": 1,
-            "neutral": 0,
-            "negative": -1
-        }
-        
-        # Create node traces
-        node_x = []
-        node_y = []
-        node_text = []
-        node_colors = []
-        node_sizes = []
-        
-        for node in nodes:
-            x, y = layout[node]
-            node_x.append(x)
-            node_y.append(y)
-            node_text.append(node)
-            
-            # Get base color from type
-            base_color = node_color_map.get(node_types[node], "gray")
-            
-            # Adjust color by sentiment
-            sentiment = node_sentiments[node]
-            
-            node_colors.append(base_color)
-            
-            # Adjust size by type
-            if node_types[node] == "actor":
-                node_sizes.append(15)
-            elif node_types[node] == "action" or node_types[node].startswith("value_"):
-                node_sizes.append(12)
-            else:
-                node_sizes.append(10)
-        
-        # Create edge traces
-        edge_traces = []
-        
-        for source, target, edge_type in edges:
-            x0, y0 = layout[source]
-            x1, y1 = layout[target]
-            
-            # Get edge color
-            edge_color = edge_color_map.get(edge_type, "gray")
-            
-            edge_trace = go.Scatter(
-                x=[x0, x1, None],
-                y=[y0, y1, None],
-                mode='lines',
-                line=dict(width=1, color=edge_color),
-                hoverinfo='none'
-            )
-            
-            edge_traces.append(edge_trace)
-        
-        # Create node trace
-        node_trace = go.Scatter(
-            x=node_x,
-            y=node_y,
-            mode='markers+text',
-            text=node_text,
-            textposition="top center",
-            marker=dict(
-                color=node_colors,
-                size=node_sizes,
-                line=dict(width=2, color='black')
-            ),
-            hoverinfo='text',
-            hovertext=node_text
-        )
         
         # Create figure
-        fig = go.Figure(
-            data=edge_traces + [node_trace],
-            layout=go.Layout(
-                title=title,
-                showlegend=False,
-                hovermode='closest',
-                margin=dict(b=20, l=5, r=5, t=40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                width=800,
-                height=800
-            )
-        )
+        plt.figure(figsize=(12, 8))
         
-        # Add legend for node types
-        for node_type, color in node_color_map.items():
-            display_name = node_type.replace("_", ": ").title()
-            
-            fig.add_trace(go.Scatter(
-                x=[None],
-                y=[None],
-                mode='markers',
-                marker=dict(size=10, color=color),
-                showlegend=True,
-                name=display_name
-            ))
+        # Draw nodes by type
+        for node_type, color in color_map.items():
+            nodes_of_type = [n for n, attr in graph.nodes(data=True) 
+                             if attr.get('type') == node_type]
+            if nodes_of_type:
+                nx.draw_networkx_nodes(graph, pos, nodelist=nodes_of_type, 
+                                       node_color=color, node_size=500, alpha=0.7)
         
-        return fig
+        # Draw edges
+        nx.draw_networkx_edges(graph, pos, alpha=0.5, arrows=True)
+        
+        # Draw labels
+        labels = {n: attr.get('text', str(n)) for n, attr in graph.nodes(data=True)}
+        nx.draw_networkx_labels(graph, pos, labels, font_size=8)
+        
+        # Create legend
+        legend_elements = [mpatches.Patch(color=color, label=node_type.title()) 
+                           for node_type, color in color_map.items()]
+        plt.legend(handles=legend_elements, loc='upper right')
+        
+        plt.title(title)
+        plt.axis('off')
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        else:
+            plt.show()
+        
+        plt.close()
     
     @staticmethod
-    def visualize_moral_foundations(
-        moral_scores: Dict[str, float],
-        title: str = "Moral Foundations Analysis"
-    ) -> go.Figure:
+    def analyze_graph_metrics(graph: nx.DiGraph) -> Dict[str, Any]:
         """
-        Create a radar chart showing moral foundation scores.
+        Analyze graph structure and return metrics.
         
         Args:
-            moral_scores: Dictionary of moral foundation scores
-            title: Plot title
+            graph: NetworkX graph to analyze
             
         Returns:
-            Plotly figure with radar chart
+            Dictionary of graph metrics
         """
-        # Ensure all foundations are present
-        foundations = ["care", "fairness", "loyalty", "authority", "purity", "liberty"]
-        scores = [moral_scores.get(f, 0.0) for f in foundations]
+        if graph.number_of_nodes() == 0:
+            return {"error": "Empty graph"}
         
-        # Create radar chart
-        fig = go.Figure()
+        metrics = {
+            "n_nodes": graph.number_of_nodes(),
+            "n_edges": graph.number_of_edges(),
+            "density": nx.density(graph),
+            "is_connected": nx.is_weakly_connected(graph),
+            "n_components": nx.number_weakly_connected_components(graph)
+        }
         
-        fig.add_trace(go.Scatterpolar(
-            r=scores,
-            theta=foundations,
-            fill='toself',
-            name='Moral Foundations'
-        ))
+        # Node type distribution
+        type_counts = {}
+        for _, attr in graph.nodes(data=True):
+            node_type = attr.get('type', 'unknown')
+            type_counts[node_type] = type_counts.get(node_type, 0) + 1
+        metrics["node_type_distribution"] = type_counts
         
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 1]
-                )
-            ),
-            title=title,
-            width=700,
-            height=500
-        )
+        # Centrality measures (for non-empty graphs)
+        try:
+            metrics["avg_degree_centrality"] = sum(nx.degree_centrality(graph).values()) / graph.number_of_nodes()
+            metrics["avg_betweenness_centrality"] = sum(nx.betweenness_centrality(graph).values()) / graph.number_of_nodes()
+        except:
+            metrics["avg_degree_centrality"] = 0
+            metrics["avg_betweenness_centrality"] = 0
         
-        return fig
+        return metrics
+
+
+# Example usage and helper functions
+def create_enhanced_ethics_model(base_model: nn.Module, **kwargs) -> GraphReasoningEthicsModel:
+    """
+    Factory function to create an enhanced ethics model with graph reasoning.
+    
+    Args:
+        base_model: Base ethics model
+        **kwargs: Additional configuration options
+        
+    Returns:
+        Enhanced ethics model with graph reasoning capabilities
+    """
+    return GraphReasoningEthicsModel(base_model, **kwargs)
+
+
+def extract_and_visualize(text: str, save_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Extract ethical relations from text and optionally visualize them.
+    
+    Args:
+        text: Input text to analyze
+        save_path: Optional path to save visualization
+        
+    Returns:
+        Dictionary containing extracted relations and graph metrics
+    """
+    extractor = EthicalRelationExtractor()
+    relations = extractor.extract_relations(text)
+    graph = relations["graph"]
+    
+    # Analyze graph
+    metrics = GraphVisualizer.analyze_graph_metrics(graph)
+    
+    # Visualize if requested
+    if save_path:
+        GraphVisualizer.visualize_ethical_graph(graph, save_path=save_path)
+    
+    return {
+        "relations": relations,
+        "metrics": metrics,
+        "graph": graph
+    }
+
+
+if __name__ == "__main__":
+    # Example usage
+    test_text = """
+    John helped Mary when she was in trouble. The government should protect 
+    the rights of all citizens. However, some politicians manipulate public 
+    opinion for their own benefit, which damages trust in democratic institutions.
+    """
+    
+    print("Extracting ethical relations from text...")
+    result = extract_and_visualize(test_text)
+    
+    print(f"Graph metrics: {result['metrics']}")
+    print(f"Found {len(result['relations']['relations'])} relationships")

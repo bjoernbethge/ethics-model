@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  ethics-model-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ethics-model-dev
+    volumes:
+      # Mount the project directory to enable live code editing
+      - .:/app
+      # Mount a volume for model checkpoints to persist between container restarts
+      - ethics_model_checkpoints:/app/checkpoints
+      # Mount a volume for outputs to persist between container restarts
+      - ethics_model_outputs:/app/outputs
+    # Keep the container running
+    command: sleep infinity
+    # Enable GPU support if available
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Set environment variables
+    environment:
+      - PYTHONPATH=/app
+      - CUDA_VISIBLE_DEVICES=all
+
+volumes:
+  ethics_model_checkpoints:
+  ethics_model_outputs:

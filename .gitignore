@@ -54,10 +54,6 @@ ENV/
 !.vscode/settings.json
 *.code-workspace
 
-# Cursor and Serena configs
-.cursor/
-.serena/
-
 # Model checkpoints and outputs
 checkpoints/*
 !checkpoints/.gitkeep

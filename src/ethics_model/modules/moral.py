@@ -9,12 +9,15 @@ frameworks including:
 - Narrative ethics
 """
 
+from typing import Callable, Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, List, Optional, Tuple, Union, Callable
-from .activation import get_activation, ReCA
-from torch_geometric.nn import GCNConv
+from torch_geometric import EdgeIndex
+from torch_geometric.nn import GCNConv, MessagePassing
+from torch_geometric.nn.aggr import VariancePreservingAggregation
+
+from .activation import RMSNorm, get_activation
 
 
 class MoralFrameworkEmbedding(nn.Module):
@@ -80,113 +83,131 @@ class MoralFrameworkEmbedding(nn.Module):
         return combined, framework_outputs
 
 
-class EthicalCrossDomainLayer(nn.Module):
+class EthicalCrossDomainLayer(MessagePassing):
     """
-    Cross-domain layer that connects ethical reasoning across different contexts
-    (economic, political, social, personal).
+    Graph-native cross-domain layer connecting ethical reasoning across contexts.
+    Uses GATv2Conv for cross-domain attention.
     """
-    
-    def __init__(self, 
-                 d_model: int, 
-                 n_domains: int = 4,
-                 n_heads: int = 8,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        n_domains: int = 4,
+        activation: str = "gelu",
+    ):
+        from torch_geometric.nn import GATv2Conv
+        super().__init__(aggr='mean', flow='source_to_target')
         
+        # Domain-specific projections
         self.domain_projections = nn.ModuleList([
             nn.Linear(d_model, d_model) for _ in range(n_domains)
         ])
         
-        self.cross_domain_attention = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
-        
-        self.domain_fusion = nn.Sequential(
-            nn.Linear(d_model * n_domains, d_model * 2),
-            get_activation(activation),
-            nn.Linear(d_model * 2, d_model)
+        # Cross-domain attention via GATv2Conv
+        self.cross_domain_gat = GATv2Conv(
+            d_model * n_domains, d_model, heads=4, concat=False
         )
         
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Domain fusion
+        self.domain_fusion = nn.Sequential(
+            nn.Linear(d_model * n_domains, d_model),
+            get_activation(activation),
+            RMSNorm(d_model)
+        )
+        self.activation = get_activation(activation)
+        
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex
+    ) -> torch.Tensor:
         """
-        Process input through different ethical domains and fuse representations.
+        Process graph through different ethical domains.
         
         Args:
-            x: Input tensor of shape (batch_size, seq_len, d_model)
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
             domain_fused: Cross-domain ethical representation
         """
-        domain_outputs = []
-        for domain_proj in self.domain_projections:
-            domain_outputs.append(domain_proj(x))  # (batch, seq_len, d_model)
-        # Concatenate domains: (batch, seq_len, n_domains * d_model)
-        domains_stacked = torch.cat(domain_outputs, dim=-1)  # (batch, seq_len, n_domains * d_model)
-        # Für Attention: Split in n_domains, dann stacken und wieder zusammenführen
-        domains_split = torch.stack(domain_outputs, dim=2)  # (batch, seq_len, n_domains, d_model)
-        domains_reshaped = domains_split.view(-1, x.size(1), x.size(2))  # (batch * n_domains, seq_len, d_model)
-        attended_domains, _ = self.cross_domain_attention(domains_reshaped, domains_reshaped, domains_reshaped)
-        attended_domains = attended_domains.reshape(x.size(0), x.size(1), -1)  # (batch, seq_len, n_domains * d_model)
-        domain_fused = self.domain_fusion(attended_domains)
+        # Project through each domain
+        domain_outputs = [proj(x) for proj in self.domain_projections]
+        
+        # Combine domains
+        combined = torch.cat(domain_outputs, dim=-1)
+        
+        # Cross-domain attention via graph convolution
+        attended = self.cross_domain_gat(combined, edge_index)
+        attended = self.activation(attended)
+        
+        # Final fusion
+        domain_fused = self.domain_fusion(combined) + attended
         return domain_fused
 
 
-class MultiFrameworkProcessor(nn.Module):
+class MultiFrameworkProcessor(MessagePassing):
     """
-    Processes text through multiple ethical frameworks simultaneously and
-    detects conflicts or consensus across frameworks.
+    Graph-native processor for multiple ethical frameworks.
+    Uses GNN layers to process frameworks across graph structure.
     """
-    
-    def __init__(self, 
-                 d_model: int,
-                 n_frameworks: int = 5,
-                 conflict_detection_dim: int = 128,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        n_frameworks: int = 5,
+        activation: str = "gelu",
+    ):
+        super().__init__(aggr='mean', flow='source_to_target')
         
-        self.framework_embedding = MoralFrameworkEmbedding(d_model, d_model // 2, n_frameworks)
+        # Framework-specific GCN layers
+        self.framework_convs = nn.ModuleDict({
+            'deontological': GCNConv(d_model, d_model),
+            'utilitarian': GCNConv(d_model, d_model),
+            'virtue': GCNConv(d_model, d_model),
+            'narrative': GCNConv(d_model, d_model),
+            'care': GCNConv(d_model, d_model),
+        })
         
-        # Detect conflicts between frameworks
-        self.conflict_detector = nn.Sequential(
-            nn.Linear(d_model, conflict_detection_dim),
+        # Framework combination
+        self.framework_combiner = nn.Sequential(
+            nn.Linear(d_model * n_frameworks, d_model),
             get_activation(activation),
-            nn.Linear(conflict_detection_dim, 1),
-            nn.Sigmoid()
+            RMSNorm(d_model)
         )
         
-        # Framework consensus layer
-        self.consensus_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=4,
-            dim_feedforward=d_model * 4,
-            activation=activation
-        )
+        # Consensus layer (GCN for consensus building)
+        self.consensus_conv = GCNConv(d_model, d_model)
+        self.activation = get_activation(activation)
         
-        self.framework_weights = nn.Parameter(torch.randn(n_frameworks))
-        
-    def forward(self, x: torch.Tensor, symbolic_constraints: Optional[Callable] = None) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex,
+        symbolic_constraints: Optional[Callable] = None
+    ) -> Dict[str, torch.Tensor]:
         """
-        Process input through multiple ethical frameworks.
+        Process graph through multiple ethical frameworks.
         
         Args:
-            x: Input tensor of shape (batch_size, seq_len, d_model)
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
-            Dictionary containing:
-                - framework_outputs: Raw framework outputs
-                - conflict_scores: Conflict detection scores
-                - consensus_output: Consensus representation
+            Dictionary with framework outputs and consensus
         """
-        # Get framework embeddings
-        combined_output, framework_outputs = self.framework_embedding(x)
+        framework_outputs = {}
+        for name, conv in self.framework_convs.items():
+            framework_outputs[name] = self.activation(conv(x, edge_index))
         
-        # Detect framework conflicts
-        conflict_scores = self.conflict_detector(combined_output)
+        # Combine frameworks
+        combined = torch.cat(list(framework_outputs.values()), dim=-1)
+        combined_output = self.framework_combiner(combined)
         
-        # Build consensus
-        consensus_output = self.consensus_layer(combined_output)
+        # Build consensus via graph convolution
+        consensus_output = self.consensus_conv(combined_output, edge_index)
+        consensus_output = self.activation(consensus_output)
         
         result = {
             'framework_outputs': framework_outputs,
-            'conflict_scores': conflict_scores,
             'consensus_output': consensus_output,
             'combined_output': combined_output
         }
@@ -251,13 +272,16 @@ class EthicalPrincipleEncoder(nn.Module):
 
 class MoralFrameworkGraphLayer(nn.Module):
     """
-    GNN-Layer für moralische Framework-Graphen (GCNConv).
-    Kann als Baustein für hybride Framework-Modelle genutzt werden.
+    Modern GNN layer for moral framework graphs using variance-preserving aggregation.
+    Prevents over-smoothing in deep moral reasoning hierarchies.
     """
     def __init__(self, in_channels: int, out_channels: int, activation: str = "gelu"):
         super().__init__()
-        self.gcn = GCNConv(in_channels, out_channels)
+        self.gcn = GCNConv(in_channels, out_channels,
+                           aggr=VariancePreservingAggregation())
         self.activation = get_activation(activation)
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, x: torch.Tensor, edge_index: EdgeIndex) -> torch.Tensor:
+        """Forward pass requiring EdgeIndex (not COO tensor)."""
         x = self.gcn(x, edge_index)
         return self.activation(x)

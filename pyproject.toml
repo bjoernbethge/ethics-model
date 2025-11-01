@@ -1,99 +1,68 @@
-[project]
-name = "ethics-model"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "Björn Bethge"}
-]
-requires-python = ">=3.11"
-dependencies = [
-    "bitsandbytes>=0.45.5",
-    "pytorch-symbolic>=1.1.1",
-    "torch-geometric>=2.6.1",
-    "spacy>=3.7.2",
-    "networkx>=3.0",
-    "plotly>=5.18.0",
-    "fastapi>=0.115.12",
-    "uvicorn>=0.34.2",
-    "mlflow>=1.30.1",
-    "torchmetrics>=1.7.1",
-    "torchinfo>=1.8.0",
-    "pip>=25.1.1",
-    "torch @ https://download.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp310-cp310-win_amd64.whl"
-]
-
-[project.optional-dependencies]
-train = [
-    "accelerate>=1.6.0",
-    "datasets>=3.5.1",
-    "hf-transfer>=0.1.9",
-    "huggingface_hub>=0.30.2",
-    "optimum>=1.24.0",
-    "peft>=0.15.2",
-    "pyarrow>=20.0.0",
-    "safetensors>=0.4.3",
-    "tensorboard>=2.16.0",
-    "torch-tb-profiler>=0.4.3",
-    "transformers>=4.40.0",
-    "transformers_stream_generator>=0.0.5"
-]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=5.0.0",
-    "tensorboard>=2.16.0",
-    "torch-tb-profiler>=0.4.3"
-]
-full = [
-    # All dependencies for training, development, and testing
-    "accelerate>=1.6.0",
-    "datasets>=3.5.1",
-    "hf-transfer>=0.1.9",
-    "huggingface_hub>=0.30.2",
-    "networkx>=3.0",
-    "plotly>=5.18.0",
-    "optimum>=1.24.0",
-    "peft>=0.15.2",
-    "pyarrow>=20.0.0",
-    "pytest>=7.4.0",
-    "safetensors>=0.4.3",
-    "tensorboard>=2.16.0",
-    "torch-tb-profiler>=0.4.3",
-    "transformers>=4.40.0",
-    "transformers_stream_generator>=0.0.5"
-]
-
-[tool.uv]
-link-mode = "copy"
-compile-bytecode = true
-cache-dir = "./.uv/cache"
-
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp310-cp310-win_amd64.whl"
-explicit = true
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project]
+name = "ethics-model"
+version = "0.1.0"
+description = "Graph Neural Network for ethical reasoning"
+readme = "README.md"
+authors = [{ name = "Björn Bethge" }]
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.8.0,<2.9.0",
+    "torchvision",
+    "torchaudio",
+    "torch-geometric>=2.7.0",
+    "transformers",
+    "sentencepiece>=0.2.1",
+    "pcst-fast>=1.0.10",
+    "accelerate",
+    "bitsandbytes",
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[project.optional-dependencies]
+train = [
+    "datasets",
+    "hf-transfer",
+    "huggingface-hub",
+    "nlpaug",
+    "optimum",
+    "peft",
+    "pyarrow",
+    "safetensors",
+    "tensorboard",
+    "torch-tb-profiler",
+    "transformers-stream-generator",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+]
+
+[tool.uv]
+python-preference = "only-managed"
+python-downloads = "automatic"
+link-mode = "copy"
+compile-bytecode = true
+find-links = [
+    "https://data.pyg.org/whl/torch-2.8.0+cu128.html"
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning"]
-norecursedirs = [
-    ".git",
-    ".hg",
-    ".tox",
-    ".venv",
-    "venv",
-    "env",
-    "build",
-    "dist",
-    ".uv",
-    ".pytest_cache",
-    "__pycache__"
-]
-addopts = [
-    "--import-mode=importlib"
-]
+python_files = ["test_*.py"]

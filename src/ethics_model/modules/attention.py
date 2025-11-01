@@ -5,220 +5,145 @@ Specialized attention mechanisms for processing ethical reasoning,
 moral intuition, and narrative framing detection.
 """
 
+from typing import Callable, Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import math
-from typing import Optional, Tuple, Dict, Callable
-from .activation import get_activation, ReCA
-from torch_geometric.nn import GATConv
+from torch_geometric import EdgeIndex
+from torch_geometric.nn import GATv2Conv, MessagePassing
 
-class EthicalAttention(nn.Module):
+from .activation import get_activation
+
+
+class EthicalAttention(MessagePassing):
     """
-    Ethical attention mechanism that focuses on morally relevant aspects
-    of the input while considering different ethical frameworks.
+    Graph-native ethical attention using GATv2Conv for moral relevance.
     """
-    
-    def __init__(self, 
-                 d_model: int,
-                 n_heads: int = 8,
-                 moral_context_dim: int = 64,
-                 dropout: float = 0.1,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int = 8,
+        dropout: float = 0.1,
+        activation: str = "gelu",
+    ):
+        super().__init__(aggr='mean', flow='source_to_target')
         
-        self.d_model = d_model
-        self.n_heads = n_heads
-        self.d_k = d_model // n_heads
+        # Use GATv2Conv for ethical attention
+        self.ethical_gat = GATv2Conv(
+            d_model, d_model, heads=n_heads,
+            dropout=dropout, concat=False
+        )
         
-        self.activation = get_activation(activation)
-        
-        # Standard attention components
-        self.q_proj = nn.Linear(d_model, d_model)
-        self.k_proj = nn.Linear(d_model, d_model)
-        self.v_proj = nn.Linear(d_model, d_model)
-        self.out_proj = nn.Linear(d_model, d_model)
-        
-        # Moral context attention modifier
-        self.moral_context_proj = nn.Linear(moral_context_dim, d_model)
-        self.moral_attention_weight = nn.Parameter(torch.randn(1, n_heads, 1, 1))
-        
-        # Ethical salience scorer
+        # Salience scorer
         self.salience_scorer = nn.Sequential(
-            nn.Linear(d_model, moral_context_dim),
-            self.activation,
-            nn.Linear(moral_context_dim, 1)
-        )
-        
-        self.dropout = nn.Dropout(dropout)
-        self.scale = math.sqrt(self.d_k)
-        
-    def forward(self, 
-                query: torch.Tensor,
-                key: torch.Tensor,
-                value: torch.Tensor,
-                moral_context: Optional[torch.Tensor] = None,
-                mask: Optional[torch.Tensor] = None,
-                symbolic_constraints: Optional[Callable] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Apply ethical attention to the input.
-        
-        Args:
-            query: Query tensor (batch_size, seq_len, d_model)
-            key: Key tensor (batch_size, seq_len, d_model)
-            value: Value tensor (batch_size, seq_len, d_model)
-            moral_context: Optional moral context vector
-            mask: Optional attention mask
-            symbolic_constraints: Optional callable for symbolic constraints
-            
-        Returns:
-            output: Attended output
-            attention_weights: Attention distribution
-        """
-        batch_size = query.size(0)
-        seq_len = query.size(1)
-        
-        # Linear projections
-        q = self.q_proj(query).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
-        k = self.k_proj(key).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
-        v = self.v_proj(value).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
-        
-        # Compute attention scores
-        scores = torch.matmul(q, k.transpose(-2, -1)) / self.scale
-        
-        # Add moral context if provided
-        if moral_context is not None:
-            # Projiziere den moralischen Kontext
-            moral_bias = self.moral_context_proj(moral_context)  # [batch_size, d_model]
-            
-            # Teile den moralischen Kontext für Multi-Head-Attention auf
-            moral_bias = moral_bias.view(batch_size, 1, self.n_heads, self.d_k)
-            moral_bias = moral_bias.permute(0, 2, 1, 3)  # [batch_size, n_heads, 1, d_k]
-            
-            # Berechne den moralischen Bias-Term für die Scores
-            # Füge eine zusätzliche Dimension für die Sequenzlänge hinzu
-            bias_expand = moral_bias.expand(batch_size, self.n_heads, seq_len, self.d_k)
-            bias_term = torch.sum(q * bias_expand, dim=-1, keepdim=True) * self.moral_attention_weight
-            scores = scores + bias_term
-        
-        # Apply mask if provided
-        if mask is not None:
-            # mask: (batch_size, seq_len) -> (batch_size, 1, 1, seq_len)
-            mask = mask.unsqueeze(1).unsqueeze(2)
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-        
-        # Compute attention weights
-        attention_weights = torch.softmax(scores, dim=-1)
-        attention_weights = self.dropout(attention_weights)
-        
-        # Apply attention
-        attended = torch.matmul(attention_weights, v)
-        attended = attended.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
-        
-        # Output projection
-        output = self.out_proj(attended)
-        
-        if symbolic_constraints is not None:
-            symbolic_result = symbolic_constraints(output, attention_weights.mean(dim=1))
-            if symbolic_result is not None:
-                output, attention_weights_out = symbolic_result
-                return output, attention_weights_out
-        return output, attention_weights.mean(dim=1)  # Average over heads for visualization
-
-
-class MoralIntuitionAttention(nn.Module):
-    """
-    Simulates fast, intuitive moral judgments characteristic of
-    System 1 thinking in dual-process theories.
-    """
-    
-    def __init__(self, 
-                 d_model: int,
-                 n_moral_foundations: int = 6,
-                 temperature: float = 1.0,
-                 activation: str = "gelu"):
-        super().__init__()
-        
-        # Moral foundations: Care, Fairness, Loyalty, Authority, Purity, Liberty
-        self.moral_foundation_embeddings = nn.Embedding(n_moral_foundations, d_model)
-        self.n_moral_foundations = n_moral_foundations
-        
-        self.activation = get_activation(activation)
-        
-        # Quick intuitive response pathway
-        self.intuition_scorer = nn.Sequential(
-            nn.Linear(d_model * 2, d_model),
-            self.activation,
-            nn.Linear(d_model, n_moral_foundations),
-            nn.Softmax(dim=-1)
-        )
-        
-        # Emotional response amplifier
-        self.emotion_amplifier = nn.Sequential(
             nn.Linear(d_model, d_model // 2),
-            nn.Tanh(),
+            get_activation(activation),
             nn.Linear(d_model // 2, 1),
             nn.Sigmoid()
         )
         
-        self.temperature = temperature
+        self.activation = get_activation(activation)
+        self.dropout = nn.Dropout(dropout)
         
-    def forward(self, 
-                x: torch.Tensor,
-                moral_context: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex,
+        symbolic_constraints: Optional[Callable] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Process input through moral intuition pathway.
+        Apply ethical attention on graph.
         
         Args:
-            x: Input tensor (batch_size, seq_len, d_model)
-            moral_context: Optional moral context
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
-            Dictionary containing:
-                - intuitive_response: Quick moral judgment (batch_size, n_moral_foundations)
-                - emotional_intensity: Emotional response strength (batch_size, seq_len, 1)
-                - foundation_activations: Activation of each moral foundation (batch_size, n_moral_foundations)
+            output: Attended node features
+            attention_weights: Attention distribution (salience scores)
         """
-        batch_size = x.size(0)
-        seq_len = x.size(1)
+        # Ethical attention via GAT
+        attended = self.ethical_gat(x, edge_index)
+        attended = self.activation(attended)
+        attended = self.dropout(attended)
         
-        # Expand moral foundations to sequence length
-        foundation_ids = torch.arange(
-            0, 
-            self.n_moral_foundations, 
-            device=x.device
-        ).unsqueeze(0).expand(batch_size, -1)
+        # Compute salience (attention weights)
+        salience = self.salience_scorer(attended)
+        attention_weights = salience.squeeze(-1)  # (num_nodes,)
         
-        foundation_embeds = self.moral_foundation_embeddings(foundation_ids)  # [batch_size, n_moral_foundations, d_model]
+        if symbolic_constraints is not None:
+            symbolic_result = symbolic_constraints(attended, attention_weights)
+            if symbolic_result is not None:
+                attended, attention_weights = symbolic_result
+                return attended, attention_weights
         
-        # Combine input with foundations
-        input_expanded = x.unsqueeze(2).expand(-1, -1, foundation_embeds.size(1), -1)  # [batch_size, seq_len, n_foundations, d_model]
-        foundation_expanded = foundation_embeds.unsqueeze(1).expand(-1, seq_len, -1, -1)  # [batch_size, seq_len, n_foundations, d_model]
+        return attended, attention_weights
+
+
+class MoralIntuitionAttention(MessagePassing):
+    """
+    Graph-native moral intuition using GCN for fast System 1 judgments.
+    """
+    def __init__(
+        self,
+        d_model: int,
+        n_moral_foundations: int = 6,
+        activation: str = "gelu",
+    ):
+        from torch_geometric.nn import GCNConv
+        super().__init__(aggr='mean', flow='source_to_target')
         
-        combined = torch.cat([input_expanded, foundation_expanded], dim=-1)  # [batch_size, seq_len, n_foundations, 2*d_model]
+        # Moral foundation embeddings
+        self.moral_foundation_embeddings = nn.Embedding(
+            n_moral_foundations, d_model
+        )
         
-        # Quick intuitive scoring
-        intuition_scores = self.intuition_scorer(combined)  # [batch_size, seq_len, n_foundations, 1]
+        # Quick intuition via GCN
+        self.intuition_conv = GCNConv(d_model, d_model)
+        
+        # Foundation classifier
+        self.foundation_classifier = nn.Sequential(
+            nn.Linear(d_model, n_moral_foundations),
+            nn.Softmax(dim=-1)
+        )
+        
+        # Emotional intensity
+        self.emotion_amplifier = nn.Sequential(
+            nn.Linear(d_model, 1),
+            nn.Sigmoid()
+        )
+        
+        self.activation = get_activation(activation)
+        
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Process graph through moral intuition pathway.
+        
+        Args:
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
+            
+        Returns:
+            Dictionary with intuitive responses and emotional intensity
+        """
+        # Quick intuition via graph convolution
+        intuitive_output = self.intuition_conv(x, edge_index)
+        intuitive_output = self.activation(intuitive_output)
+        
+        # Classify moral foundations
+        foundation_activations = self.foundation_classifier(intuitive_output)
         
         # Compute emotional intensity
-        emotional_intensity = self.emotion_amplifier(x)  # [batch_size, seq_len, 1]
-        
-        # Weight intuitions by emotional intensity
-        weighted_intuitions = intuition_scores * emotional_intensity.unsqueeze(-2)  # [batch_size, seq_len, n_foundations]
-        
-        # Average over sequence to get overall intuitive response - korrigiere die Dimensionen
-        intuitive_response = weighted_intuitions.mean(dim=1)  # [batch_size, n_foundations]
-        
-        # Stelle sicher, dass die Ausgabeform korrekt ist
-        if len(intuitive_response.shape) == 3 and intuitive_response.shape[2] == self.n_moral_foundations:
-            # Reduziere die überschüssige Dimension
-            intuitive_response = intuitive_response.squeeze(-1)
+        emotional_intensity = self.emotion_amplifier(intuitive_output)
         
         return {
-            'intuitive_response': intuitive_response,  # (batch_size, n_moral_foundations)
-            'emotional_intensity': emotional_intensity,  # (batch_size, seq_len, 1)
-            'foundation_activations': intuitive_response  # (batch_size, n_moral_foundations)
+            'intuitive_response': intuitive_output,
+            'emotional_intensity': emotional_intensity,
+            'foundation_activations': foundation_activations
         }
 
 
@@ -338,7 +263,7 @@ class DoubleProcessingAttention(nn.Module):
                 self.activation,
                 nn.Linear(d_model * 2, d_model)
             ),
-            'norm': nn.LayerNorm(d_model)
+            'norm': RMSNorm(d_model)
         })
         
         # Conflict resolution
@@ -393,13 +318,17 @@ class DoubleProcessingAttention(nn.Module):
 
 class GraphAttentionLayer(nn.Module):
     """
-    Graph Attention Layer auf Basis von torch_geometric GATConv.
-    Kann als Baustein für hybride Attention-Modelle genutzt werden.
+    Modern Graph Attention Layer using GATv2Conv with EdgeIndex optimization.
+    GATv2Conv provides dynamic attention (better than static GAT).
     """
-    def __init__(self, in_channels: int, out_channels: int, heads: int = 1, activation: str = "gelu"):
+    def __init__(self, in_channels: int, out_channels: int, heads: int = 1,
+                 activation: str = "gelu", dropout: float = 0.1):
         super().__init__()
-        self.gat = GATConv(in_channels, out_channels, heads=heads, concat=False)
+        self.gat = GATv2Conv(in_channels, out_channels, heads=heads,
+                             concat=False, dropout=dropout)
         self.activation = get_activation(activation)
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, x: torch.Tensor, edge_index: EdgeIndex) -> torch.Tensor:
+        """Forward pass requiring EdgeIndex (not COO tensor)."""
         x = self.gat(x, edge_index)
         return self.activation(x)

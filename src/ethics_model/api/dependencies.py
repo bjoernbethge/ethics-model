@@ -8,19 +8,20 @@ model loading, tokenizer initialization, and other shared resources.
 import logging
 import os
 from functools import lru_cache
+from typing import Any
 
 import torch
 from fastapi import Depends
 from transformers import AutoModel, AutoTokenizer
 
-from ..model import EthicsModel, create_ethics_model
+from ..modules.retriever import EthicsModel
 from .settings import Settings, get_settings
 
 logger = logging.getLogger("ethics_model.api.dependencies")
 
 
 @lru_cache
-def get_model(settings: Settings = Depends(get_settings)) -> EthicsModel:
+def get_model(settings: Settings = Depends(get_settings)) -> Any:
     """
     Load and cache the Ethics Model.
     
@@ -32,8 +33,8 @@ def get_model(settings: Settings = Depends(get_settings)) -> EthicsModel:
     """
     logger.info(f"Loading Ethics Model (device: {settings.device})")
     
-    # Create model from config
-    model = create_ethics_model(settings.model_config)
+    # Create model (GRetriever-based)
+    model = EthicsModel()
     
     # Load checkpoint if available
     if settings.checkpoint_path and os.path.exists(settings.checkpoint_path):

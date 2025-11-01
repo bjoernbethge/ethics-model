@@ -5,86 +5,79 @@ Components for detecting manipulation in narratives, cognitive dissonance,
 and framing techniques in text.
 """
 
+from typing import Callable, Dict, Optional
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, List, Optional, Tuple, Callable
-from .activation import get_activation, ReCA
-from torch_geometric.nn import GCNConv
+from torch_geometric import EdgeIndex
+from torch_geometric.nn import GATv2Conv, GCNConv, MessagePassing
+
+from .activation import get_activation
 
 
-class FramingDetector(nn.Module):
+class FramingDetector(MessagePassing):
     """
-    Detects different framing techniques in text including:
-    - Loss vs gain framing
-    - Moral framing
-    - Episodic vs thematic framing
+    Graph-native framing detector using GCN for frame consistency.
     """
-    
-    def __init__(self, 
-                 d_model: int,
-                 n_framing_types: int = 6,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        activation: str = "gelu",
+    ):
+        super().__init__(aggr='mean', flow='source_to_target')
         
         # Frame type encoders
         self.frame_encoders = nn.ModuleDict({
             'loss_gain': nn.Linear(d_model, 2),
-            'moral': nn.Linear(d_model, 5),  # Care, Fairness, Loyalty, Authority, Purity
+            'moral': nn.Linear(d_model, 5),
             'episodic_thematic': nn.Linear(d_model, 2),
             'problem_solution': nn.Linear(d_model, 2),
             'conflict_consensus': nn.Linear(d_model, 2),
             'urgency_deliberation': nn.Linear(d_model, 2)
         })
         
+        # Frame consistency via GCN
+        self.consistency_conv = GCNConv(d_model, d_model)
+        
         # Framing strength detector
         self.strength_detector = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            get_activation(activation),
-            nn.Linear(d_model // 2, 1),
+            nn.Linear(d_model, 1),
             nn.Sigmoid()
         )
         
-        # Frame consistency checker
-        self.consistency_checker = nn.LSTM(
-            input_size=d_model,
-            hidden_size=d_model // 2,
-            num_layers=2,
-            batch_first=True,
-            bidirectional=True
-        )
+        self.activation = get_activation(activation)
         
-    def forward(self, x: torch.Tensor, symbolic_constraints: Optional[Callable] = None) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex,
+        symbolic_constraints: Optional[Callable] = None
+    ) -> Dict[str, torch.Tensor]:
         """
-        Detect framing techniques in text.
+        Detect framing techniques in graph.
         
         Args:
-            x: Input tensor (batch_size, seq_len, d_model)
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
-            Dictionary containing:
-                - frame_scores: Scores for each framing type
-                - framing_strength: Overall framing strength
-                - consistency_score: Frame consistency score
+            Dictionary with frame scores and consistency
         """
-        batch_size, seq_len, _ = x.size()
-        
         # Detect frame types
         frame_scores = {}
         for frame_type, encoder in self.frame_encoders.items():
             scores = encoder(x)
             frame_scores[frame_type] = torch.softmax(scores, dim=-1)
         
-        # Measure framing strength
-        framing_strength = self.strength_detector(x)
+        # Check consistency via graph convolution
+        consistency_features = self.consistency_conv(x, edge_index)
+        consistency_features = self.activation(consistency_features)
         
-        # Check frame consistency
-        consistency_features, _ = self.consistency_checker(x)
-        consistency_score = torch.cosine_similarity(
-            consistency_features[:, :-1, :],
-            consistency_features[:, 1:, :],
-            dim=-1
-        ).mean(dim=-1, keepdim=True)
+        # Consistency score (similarity between connected nodes)
+        consistency_score = self.strength_detector(consistency_features)
+        
+        # Framing strength
+        framing_strength = self.strength_detector(x)
         
         result = {
             'frame_scores': frame_scores,
@@ -98,256 +91,216 @@ class FramingDetector(nn.Module):
         return result
 
 
-class CognitiveDissonanceLayer(nn.Module):
+class CognitiveDissonanceLayer(MessagePassing):
     """
-    Detects and measures cognitive dissonance in ethical narratives
-    by identifying contradictory moral claims or values.
+    Graph-native cognitive dissonance detector.
+    Uses GCN to detect value conflicts between connected nodes.
     """
-    
-    def __init__(self, 
-                 d_model: int,
-                 n_moral_values: int = 8,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        n_moral_values: int = 8,
+        activation: str = "gelu",
+    ):
+        super().__init__(aggr='mean', flow='source_to_target')
         
-        # Value conflict detection
+        # Value encoder
         self.value_encoder = nn.Linear(d_model, n_moral_values)
         
-        # Contradiction detector
-        self.contradiction_detector = nn.Sequential(
-            nn.Linear(d_model * 2, d_model),
-            get_activation(activation),
+        # Contradiction detector via GCN
+        self.contradiction_conv = GCNConv(d_model, d_model)
+        
+        # Dissonance scorer
+        self.dissonance_scorer = nn.Sequential(
             nn.Linear(d_model, 1),
             nn.Sigmoid()
         )
         
-        # Dissonance resolution predictor
+        # Resolution predictor
         self.resolution_predictor = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            get_activation(activation),
-            nn.Linear(d_model // 2, 3),  # Justify, Change, Minimize
+            nn.Linear(d_model, 3),
             nn.Softmax(dim=-1)
         )
         
-        # Value importance weighting
-        self.value_importance = nn.Parameter(torch.randn(n_moral_values))
+        self.activation = get_activation(activation)
         
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex
+    ) -> Dict[str, torch.Tensor]:
         """
-        Detect cognitive dissonance in text.
+        Detect cognitive dissonance in graph.
         
         Args:
-            x: Input tensor (batch_size, seq_len, d_model)
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
-            Dictionary containing:
-                - value_conflicts: Detected conflicts between values
-                - dissonance_score: Overall dissonance score
-                - resolution_strategy: Predicted dissonance resolution
+            Dictionary with dissonance scores and resolution
         """
-        # Encode moral values in text
+        # Encode moral values
         value_activations = torch.softmax(self.value_encoder(x), dim=-1)
         
-        # Detect contradictions between adjacent segments
-        pair_features = torch.cat([x[:, :-1, :], x[:, 1:, :]], dim=-1)
-        contradiction_scores = self.contradiction_detector(pair_features)
+        # Detect contradictions via graph convolution
+        contradiction_features = self.contradiction_conv(x, edge_index)
+        contradiction_features = self.activation(contradiction_features)
         
-        # Calculate value conflicts
-        value_importance_normalized = torch.softmax(self.value_importance, dim=0)
-        value_conflicts = contradiction_scores * torch.sum(
-            value_activations[:, :-1, :] * value_activations[:, 1:, :],
-            dim=-1,
-            keepdim=True
-        )
+        # Dissonance score
+        dissonance_score = self.dissonance_scorer(contradiction_features)
         
-        # Predict dissonance resolution strategy
-        resolution_strategy = self.resolution_predictor(x)
-        
-        # Overall dissonance score
-        dissonance_score = value_conflicts.mean(dim=1)
+        # Resolution strategy
+        resolution_strategy = self.resolution_predictor(contradiction_features)
         
         return {
-            'value_conflicts': value_conflicts,
             'dissonance_score': dissonance_score,
             'resolution_strategy': resolution_strategy,
             'value_activations': value_activations
         }
 
 
-class NarrativeManipulationDetector(nn.Module):
+class NarrativeManipulationDetector(MessagePassing):
     """
     Comprehensive detector for various manipulation techniques in narratives
     including emotional appeals, logical fallacies, and framing biases.
     """
     
-    def __init__(self, 
-                 d_model: int,
-                 n_manipulation_types: int = 8,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        activation: str = "gelu",
+    ):
+        super().__init__(aggr='mean', flow='source_to_target')
         
-        # Manipulation technique detectors
-        self.manipulation_detectors = nn.ModuleDict({
-            'emotional_appeal': self._create_detector(d_model, activation),
-            'false_dichotomy': self._create_detector(d_model, activation),
-            'appeal_to_authority': self._create_detector(d_model, activation),
-            'bandwagon': self._create_detector(d_model, activation),
-            'loaded_language': self._create_detector(d_model, activation),
-            'cherry_picking': self._create_detector(d_model, activation),
-            'straw_man': self._create_detector(d_model, activation),
-            'slippery_slope': self._create_detector(d_model, activation)
+        # Manipulation detection via GCN
+        self.manipulation_conv = GCNConv(d_model, d_model)
+        
+        # Technique classifiers
+        self.technique_classifiers = nn.ModuleDict({
+            'emotional_appeal': nn.Linear(d_model, 1),
+            'false_dichotomy': nn.Linear(d_model, 1),
+            'appeal_to_authority': nn.Linear(d_model, 1),
+            'bandwagon': nn.Linear(d_model, 1),
+            'loaded_language': nn.Linear(d_model, 1),
+            'cherry_picking': nn.Linear(d_model, 1),
+            'straw_man': nn.Linear(d_model, 1),
+            'slippery_slope': nn.Linear(d_model, 1)
         })
         
-        # Aggregate manipulation score
+        # Aggregate score
         self.aggregator = nn.Sequential(
-            nn.Linear(len(self.manipulation_detectors), d_model // 2),
-            get_activation(activation),
-            nn.Linear(d_model // 2, 1),
+            nn.Linear(d_model, 1),
             nn.Sigmoid()
         )
         
-        # Confidence calibrator
-        self.calibrator = nn.Sequential(
-            nn.Linear(d_model, d_model // 4),
-            get_activation(activation),
-            nn.Linear(d_model // 4, 1),
-            nn.Sigmoid()
-        )
+        self.activation = get_activation(activation)
         
-    def _create_detector(self, d_model: int, activation: str) -> nn.Module:
-        """Create a detector for a specific manipulation technique."""
-        return nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            get_activation(activation),
-            nn.Linear(d_model // 2, 1),
-            nn.Sigmoid()
-        )
-    
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex
+    ) -> Dict[str, torch.Tensor]:
         """
-        Detect various manipulation techniques in text.
+        Detect manipulation techniques in graph.
         
         Args:
-            x: Input tensor (batch_size, seq_len, d_model)
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
-            Dictionary containing:
-                - technique_scores: Individual manipulation technique scores
-                - aggregate_score: Overall manipulation score
-                - confidence: Confidence in detection
-                - manipulation_map: Spatial map of manipulation
+            Dictionary with manipulation scores
         """
-        # Detect each manipulation technique
+        # Process via graph convolution
+        manipulation_features = self.manipulation_conv(x, edge_index)
+        manipulation_features = self.activation(manipulation_features)
+        
+        # Detect each technique
         technique_scores = {}
-        score_tensors = []
-        
-        for technique, detector in self.manipulation_detectors.items():
-            score = detector(x)
+        for technique, classifier in self.technique_classifiers.items():
+            score = torch.sigmoid(classifier(manipulation_features))
             technique_scores[technique] = score
-            score_tensors.append(score)
         
-        # Combine scores
-        combined_scores = torch.cat(score_tensors, dim=-1)
-        
-        # Calculate aggregate manipulation score
-        aggregate_score = self.aggregator(combined_scores)
-        
-        # Calculate confidence
-        confidence = self.calibrator(x)
-        
-        # Create manipulation map (2D representation)
-        manipulation_map = aggregate_score * confidence
+        # Aggregate score
+        aggregate_score = self.aggregator(manipulation_features)
         
         return {
             'technique_scores': technique_scores,
             'aggregate_score': aggregate_score,
-            'confidence': confidence,
-            'manipulation_map': manipulation_map
+            'manipulation_features': manipulation_features
         }
 
 
-class PropagandaDetector(nn.Module):
+class PropagandaDetector(MessagePassing):
     """
-    Specialized detector for propaganda techniques and systematic
-    manipulation patterns in communication.
+    Graph-native propaganda detector using GATv2Conv.
     """
-    
-    def __init__(self, 
-                 d_model: int,
-                 n_propaganda_techniques: int = 14,
-                 activation: str = "gelu"):
-        super().__init__()
+    def __init__(
+        self,
+        d_model: int,
+        activation: str = "gelu",
+    ):
+        super().__init__(aggr='mean', flow='source_to_target')
         
-        # Propaganda technique encoding based on research
-        self.technique_embeddings = nn.Embedding(n_propaganda_techniques, d_model)
+        # Propaganda detection via GATv2
+        self.propaganda_gat = GATv2Conv(d_model, d_model, heads=4, concat=False)
         
-        # Pattern matcher for propaganda techniques
-        self.pattern_matcher = nn.Conv1d(
-            in_channels=d_model,
-            out_channels=n_propaganda_techniques,
-            kernel_size=3,
-            padding=1
-        )
-        
-        # Propaganda intensity scorer
+        # Intensity scorer
         self.intensity_scorer = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            get_activation(activation),
-            nn.Linear(d_model // 2, 1),
+            nn.Linear(d_model, 1),
             nn.Sigmoid()
         )
         
-        # Source credibility estimator
+        # Credibility estimator
         self.credibility_estimator = nn.Sequential(
-            nn.Linear(d_model, d_model // 4),
-            get_activation(activation),
-            nn.Linear(d_model // 4, 1),
+            nn.Linear(d_model, 1),
             nn.Sigmoid()
         )
         
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        self.activation = get_activation(activation)
+        
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: EdgeIndex
+    ) -> Dict[str, torch.Tensor]:
         """
-        Detect propaganda techniques in text.
+        Detect propaganda in graph.
         
         Args:
-            x: Input tensor (batch_size, seq_len, d_model)
+            x: Node features (num_nodes, d_model)
+            edge_index: Graph edge indices
             
         Returns:
-            Dictionary containing:
-                - technique_matches: Matched propaganda techniques
-                - intensity_score: Propaganda intensity
-                - credibility_score: Source credibility estimation
+            Dictionary with propaganda scores
         """
-        # Transpose for convolution
-        x_transposed = x.transpose(1, 2)
+        # Propaganda detection
+        propaganda_features = self.propaganda_gat(x, edge_index)
+        propaganda_features = self.activation(propaganda_features)
         
-        # Detect propaganda techniques
-        technique_matches = self.pattern_matcher(x_transposed)
-        technique_matches = torch.sigmoid(technique_matches.transpose(1, 2))
+        # Intensity score
+        intensity_score = self.intensity_scorer(propaganda_features)
         
-        # Score propaganda intensity
-        intensity_score = self.intensity_scorer(x)
-        
-        # Estimate source credibility
-        credibility_score = self.credibility_estimator(x.mean(dim=1, keepdim=True))
+        # Credibility score
+        credibility_score = self.credibility_estimator(propaganda_features)
         
         return {
-            'technique_matches': technique_matches,
             'intensity_score': intensity_score,
             'credibility_score': credibility_score,
-            'inverse_credibility': 1 - credibility_score  # Higher when less credible
+            'inverse_credibility': 1 - credibility_score
         }
 
 
 class NarrativeGraphLayer(nn.Module):
     """
-    GNN-Layer für narrative Graphstrukturen (GCNConv).
-    Kann als Baustein für hybride Narrative-Modelle genutzt werden.
+    Modern GNN layer for narrative graph structures using EdgeIndex optimization.
+    Processes narrative framing, manipulation patterns, and discourse structure.
     """
     def __init__(self, in_channels: int, out_channels: int, activation: str = "gelu"):
         super().__init__()
         self.gcn = GCNConv(in_channels, out_channels)
         self.activation = get_activation(activation)
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, x: torch.Tensor, edge_index: EdgeIndex) -> torch.Tensor:
+        """Forward pass requiring EdgeIndex (not COO tensor)."""
         x = self.gcn(x, edge_index)
         return self.activation(x)

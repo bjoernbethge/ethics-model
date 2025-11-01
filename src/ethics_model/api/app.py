@@ -6,20 +6,21 @@ text analysis, ethical evaluation, and visualization using the Ethics Model.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
+from ..modules.retriever import EthicsModel
 from .app_training import router as training_router
 from .app_visualization import router as visualization_router
-from .dependencies import get_model, get_tokenizer, get_llm
+from .dependencies import get_llm, get_model, get_tokenizer
 from .settings import Settings, get_settings
-from ..model import EthicsModel
 
 # Configure logging
 logging.basicConfig(

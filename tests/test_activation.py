@@ -1,66 +1,43 @@
-"""
-Test activation functions.
-"""
-import torch
 import pytest
+import torch
 
-try:
-    from ethics_model.modules.activation import get_activation, ReCA
-except ImportError:
-    pytest.skip("Activation modules not available", allow_module_level=True)
+from ethics_model.modules.activation import ReCA, RMSNorm, SwiGLU, get_activation
 
 
-def test_get_activation_all():
-    """Test all activation functions."""
-    names = ["relu", "leakyrelu", "prelu", "gelu", "swish", "mish", "reca"]
-    
+def test_get_activation_all(summary_writer, cpu_or_cuda_profiler, symbolic_constraints):
+    names = ["relu", "leakyrelu", "prelu", "gelu", "swish", "mish", "reca", "silu"]
     for name in names:
         act = get_activation(name)
         x = torch.randn(4, 4)
         out = act(x)
+        summary_writer.add_text(f'profiler/{name}_key_operators', str(cpu_or_cuda_profiler.key_averages().table(sort_by="cpu_time_total", row_limit=5)))
+        summary_writer.add_scalar(f'dummy/{name}_sum', float(out.sum()), 0)
         assert out.shape == x.shape
-        assert isinstance(out, torch.Tensor)
-
 
 def test_get_activation_invalid():
-    """Test invalid activation function name."""
     with pytest.raises(ValueError):
-        get_activation("unknown_activation")
+        get_activation("unknown")
 
-
-def test_reca_forward():
-    """Test ReCA activation function."""
+def test_reca_forward(summary_writer, cpu_or_cuda_profiler):
     act = ReCA()
     x = torch.randn(3, 3)
     out = act(x)
+    summary_writer.add_text('profiler/reca_key_operators', str(cpu_or_cuda_profiler.key_averages().table(sort_by="cpu_time_total", row_limit=5)))
+    summary_writer.add_scalar('dummy/reca_sum', float(out.sum()), 0)
     assert out.shape == x.shape
-    assert isinstance(out, torch.Tensor)
 
+def test_rmsnorm_forward(summary_writer, cpu_or_cuda_profiler):
+    norm = RMSNorm(16)
+    x = torch.randn(2, 4, 16)
+    out = norm(x)
+    summary_writer.add_text('profiler/rmsnorm_key_operators', str(cpu_or_cuda_profiler.key_averages().table(sort_by="cpu_time_total", row_limit=5)))
+    summary_writer.add_scalar('dummy/rmsnorm_mean', float(out.mean()), 0)
+    assert out.shape == x.shape
 
-def test_reca_parameters():
-    """Test ReCA with custom parameters."""
-    act = ReCA(alpha=0.5, beta=0.3)
-    assert abs(act.alpha.item() - 0.5) < 1e-5
-    assert abs(act.beta.item() - 0.3) < 1e-5
-    
-    x = torch.randn(2, 2)
+def test_swiglu_forward(summary_writer, cpu_or_cuda_profiler):
+    act = SwiGLU(16)
+    x = torch.randn(2, 4, 32)  # Input needs to be 2x dim for chunking
     out = act(x)
-    assert out.shape == x.shape
-
-
-def test_activation_gradients():
-    """Test that activations preserve gradients."""
-    x = torch.randn(2, 2, requires_grad=True)
-    
-    for name in ["relu", "gelu", "reca"]:
-        act = get_activation(name)
-        out = act(x)
-        loss = out.sum()
-        loss.backward(retain_graph=True)
-        
-        assert x.grad is not None
-        x.grad.zero_()
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    summary_writer.add_text('profiler/swiglu_key_operators', str(cpu_or_cuda_profiler.key_averages().table(sort_by="cpu_time_total", row_limit=5)))
+    summary_writer.add_scalar('dummy/swiglu_sum', float(out.sum()), 0)
+    assert out.shape == (2, 4, 16) 

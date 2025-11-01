@@ -5,22 +5,26 @@ This module adds routes for model training, visualization, and evaluation
 to the main Ethics Model API.
 """
 
+import json
 import logging
 import os
 import time
 import uuid
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from fastapi import Depends, BackgroundTasks, HTTPException, APIRouter
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .dependencies import get_model, get_tokenizer, get_llm
+from ..data import EthicsDataset
+from ..modules.retriever import EthicsModel
+from ..training import train
+from .dependencies import get_llm, get_model, get_tokenizer
 from .settings import Settings, get_settings
-from ..model import EthicsModel
 
 # Configure logging
 logger = logging.getLogger("ethics_model.api.training")
@@ -289,7 +293,8 @@ def _run_training_task(
     import torch.utils.data as data_utils
     from sklearn.model_selection import train_test_split
     from torch.utils.tensorboard import SummaryWriter
-    from ..data import MultiTaskDataset
+
+    from ..data import EthicsDataset
 
     try:
         # Update task status
@@ -350,7 +355,7 @@ def _run_training_task(
         os.makedirs(log_dir, exist_ok=True)
         writer = SummaryWriter(log_dir=log_dir)
         
-        # Create dataset using MultiTaskDataset
+        # Create dataset using EthicsDataset
         logger.info(f"Creating dataset with {len(train_texts)} texts")
         
         # Split data if validation split > 0
@@ -369,7 +374,7 @@ def _run_training_task(
             val_data_manip = [manipulation_labels[i] for i in val_indices]
             
             # Create datasets
-            train_dataset = MultiTaskDataset(
+            train_dataset = EthicsDataset(
                 train_data_texts, 
                 train_data_ethics, 
                 train_data_manip, 
@@ -379,7 +384,7 @@ def _run_training_task(
                 synonym_augment=synonym_augment_fn
             )
             
-            val_dataset = MultiTaskDataset(
+            val_dataset = EthicsDataset(
                 val_data_texts, 
                 val_data_ethics, 
                 val_data_manip, 
@@ -397,7 +402,7 @@ def _run_training_task(
             )
         else:
             # Use all data for training
-            train_dataset = MultiTaskDataset(
+            train_dataset = EthicsDataset(
                 train_texts, 
                 ethics_labels, 
                 manipulation_labels, 

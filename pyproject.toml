@@ -23,6 +23,8 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic-settings",
     "polars",
+    "matplotlib",
+    "plotly",
 ]
 
 [project.optional-dependencies]

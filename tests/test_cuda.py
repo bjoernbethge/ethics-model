@@ -1,8 +1,16 @@
+"""
+Test CUDA availability and device information.
+"""
+import logging
 import torch
 
+logger = logging.getLogger(__name__)
+
+
 def test_cuda_available():
-    assert torch.cuda.is_available(), "CUDA ist nicht verfügbar!"
-    print(f"CUDA verfügbar: {torch.cuda.is_available()}")
-    print(f"Anzahl GPUs: {torch.cuda.device_count()}")
-    print(f"Aktuelle Device-ID: {torch.cuda.current_device()}")
-    print(f"Device-Name: {torch.cuda.get_device_name(torch.cuda.current_device())}") 
+    """Test if CUDA is available and log device information."""
+    assert torch.cuda.is_available(), "CUDA is not available!"
+    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+    logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
+    logger.info(f"Current device ID: {torch.cuda.current_device()}")
+    logger.info(f"Device name: {torch.cuda.get_device_name(torch.cuda.current_device())}") 

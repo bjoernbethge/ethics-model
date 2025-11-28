@@ -6,12 +6,20 @@ from Hendrycks et al. (2021) for training ethical analysis models.
 Uses Polars for efficient data processing.
 """
 
+import logging
 import os
-import polars as pl
-from typing import Dict, List, Tuple, Optional, Union, Any
+from typing import Any, Callable, Dict, List, Optional
+
+try:
+    import polars as pl
+except ImportError:
+    pl = None  # Optional dependency
+
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 from transformers import PreTrainedTokenizer
+
+logger = logging.getLogger(__name__)
 
 # Ethical domains in the ETHICS dataset
 DOMAINS = [
@@ -21,6 +29,77 @@ DOMAINS = [
     "utilitarianism",
     "commonsense"
 ]
+
+
+class EthicsDataset(Dataset):
+    """
+    Simple PyTorch Dataset for ethics text analysis.
+    
+    Args:
+        texts: List of text strings
+        ethics_labels: List of ethics scores (0.0-1.0)
+        manipulation_labels: List of manipulation scores (0.0-1.0)
+        tokenizer: HuggingFace tokenizer for text processing
+        max_length: Maximum sequence length for tokenization
+        augment: Whether to use data augmentation
+        synonym_augment: Optional function for synonym-based augmentation
+    """
+    
+    def __init__(
+        self,
+        texts: List[str],
+        ethics_labels: List[float],
+        manipulation_labels: List[float],
+        tokenizer: PreTrainedTokenizer,
+        max_length: int = 128,
+        augment: bool = False,
+        synonym_augment: Optional[Callable[[str], str]] = None
+    ):
+        self.texts = texts
+        self.ethics_labels = ethics_labels
+        self.manipulation_labels = manipulation_labels
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.augment = augment
+        self.synonym_augment = synonym_augment
+    
+    def __len__(self) -> int:
+        """Get the number of examples in the dataset."""
+        return len(self.texts)
+    
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """
+        Get an example from the dataset.
+        
+        Args:
+            idx: Index of the example
+            
+        Returns:
+            Dictionary containing tokenized text and labels
+        """
+        text = self.texts[idx]
+        
+        # Apply augmentation if enabled
+        if self.augment and self.synonym_augment is not None:
+            import random
+            if random.random() < 0.3:
+                text = self.synonym_augment(text)
+        
+        # Tokenize text
+        inputs = self.tokenizer(
+            text,
+            return_tensors='pt',
+            max_length=self.max_length,
+            truncation=True,
+            padding='max_length'
+        )
+        
+        # Create item dictionary
+        item = {k: v.squeeze(0) for k, v in inputs.items()}
+        item['ethics_label'] = torch.tensor([self.ethics_labels[idx]], dtype=torch.float32)
+        item['manipulation_label'] = torch.tensor([self.manipulation_labels[idx]], dtype=torch.float32)
+        
+        return item
 
 class ETHICSDataset(Dataset):
     """
@@ -33,9 +112,6 @@ class ETHICSDataset(Dataset):
         data_dir: Directory containing the ETHICS dataset
         tokenizer: HuggingFace tokenizer for text processing
         max_length: Maximum sequence length for tokenization
-        use_graphbrain: Whether to use GraphBrain for semantic hypergraph processing
-        parser_lang: Language for GraphBrain parser
-        cache_graphs: Whether to cache processed graphs
     """
     
     def __init__(
@@ -44,19 +120,13 @@ class ETHICSDataset(Dataset):
         split: str,
         data_dir: str,
         tokenizer: PreTrainedTokenizer,
-        max_length: int = 128,
-        use_graphbrain: bool = True,
-        parser_lang: str = "en",
-        cache_graphs: bool = True
+        max_length: int = 128
     ):
         self.domain = domain
         self.split = split
         self.data_dir = data_dir
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.use_graphbrain = use_graphbrain
-        self.parser_lang = parser_lang
-        self.cache_graphs = cache_graphs
         
         # Handle 'ambiguous' split only for commonsense
         if split == "ambiguous" and domain != "commonsense":
@@ -64,30 +134,19 @@ class ETHICSDataset(Dataset):
         
         # Load data
         self.data = self._load_data()
-        
-        # Initialize GraphBrain parser if needed
-        self.parser = None
-        if self.use_graphbrain:
-            try:
-                import graphbrain as gb
-                self.parser = gb.Parser(model=f"{self.parser_lang}_core_web_sm")
-                self.graph_cache = {}
-            except ImportError:
-                print("GraphBrain not available. Install with 'pip install graphbrain'")
-                self.use_graphbrain = False
-            except Exception as e:
-                print(f"Error initializing GraphBrain parser: {e}")
-                print(f"Make sure you have the {self.parser_lang}_core_web_sm model installed:")
-                print(f"python -m spacy download {self.parser_lang}_core_web_sm")
-                self.use_graphbrain = False
     
-    def _load_data(self) -> pl.DataFrame:
+    def _load_data(self):
         """
         Load and preprocess data from the ETHICS dataset.
         
         Returns:
             Polars DataFrame containing the dataset
         """
+        if pl is None:
+            raise ImportError(
+                "polars is required for ETHICSDataset. "
+                "Install it with: uv sync --extra train"
+            )
         # Define file path
         if self.split == "ambiguous":
             file_path = os.path.join(self.data_dir, self.domain, f"{self.split}.csv")
@@ -153,122 +212,6 @@ class ETHICSDataset(Dataset):
         
         return df
     
-    def _process_text_to_graph(self, text: str) -> Optional[Any]:
-        """
-        Process text to create a GraphBrain hypergraph.
-        
-        Args:
-            text: Text to process
-            
-        Returns:
-            GraphBrain hypergraph or None if processing failed
-        """
-        if not self.use_graphbrain or self.parser is None:
-            return None
-            
-        # Use cache if available
-        cache_key = hash(text)
-        if self.cache_graphs and cache_key in self.graph_cache:
-            return self.graph_cache[cache_key]
-            
-        try:
-            import graphbrain as gb
-            from graphbrain import hgraph
-            
-            # Create hypergraph
-            hg = hgraph()
-            
-            # Parse text and add to hypergraph
-            for sentence in text.split('.'):
-                if sentence.strip():
-                    parse = self.parser.parse(sentence)
-                    hg.add(parse)
-                    
-            # Cache result
-            if self.cache_graphs:
-                self.graph_cache[cache_key] = hg
-                
-            return hg
-        except Exception as e:
-            print(f"Error processing text to graph: {str(e)[:100]}")
-            return None
-    
-    def _prepare_graph_data(self, text: str) -> Dict[str, Any]:
-        """
-        Prepare graph data for model input.
-        
-        Args:
-            text: Text to process
-            
-        Returns:
-            Dictionary with graph data
-        """
-        # Process text to graph
-        hg = self._process_text_to_graph(text)
-        
-        if hg is None:
-            return {'has_graph': False}
-        
-        try:
-            import graphbrain as gb
-            
-            # Extract nodes (atoms)
-            nodes = list(hg.all_atoms())
-            
-            # Create node map for edge index creation
-            node_map = {node: i for i, node in enumerate(nodes)}
-            
-            # Create edge index
-            edge_index = []
-            edge_types = []
-            
-            # Extract edges
-            for edge in hg.all_edges():
-                if len(edge) > 1:
-                    pred = edge[0]  # Predicate is typically first
-                    
-                    if gb.is_atom(pred):
-                        pred_idx = node_map.get(pred)
-                        
-                        if pred_idx is not None:
-                            # Connect predicate to all arguments
-                            for i in range(1, len(edge)):
-                                if gb.is_atom(edge[i]):
-                                    arg_idx = node_map.get(edge[i])
-                                    
-                                    if arg_idx is not None:
-                                        # Add bidirectional connections
-                                        edge_index.append([pred_idx, arg_idx])
-                                        edge_index.append([arg_idx, pred_idx])
-                                        
-                                        # Add edge types (simplified)
-                                        edge_type = 0  # Default
-                                        edge_types.append(edge_type)
-                                        edge_types.append(edge_type)
-            
-            # Convert to tensors
-            if edge_index:
-                edge_index_tensor = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-                edge_types_tensor = torch.tensor(edge_types, dtype=torch.long)
-            else:
-                # Empty graph fallback
-                edge_index_tensor = torch.zeros((2, 0), dtype=torch.long)
-                edge_types_tensor = torch.zeros(0, dtype=torch.long)
-            
-            # Simple node features (one-hot encoding)
-            node_features = torch.eye(len(nodes))
-            
-            return {
-                'has_graph': True,
-                'nodes': nodes,
-                'node_features': node_features,
-                'edge_index': edge_index_tensor,
-                'edge_types': edge_types_tensor
-            }
-        except Exception as e:
-            print(f"Error preparing graph data: {str(e)[:100]}")
-            return {'has_graph': False}
-    
     def __len__(self) -> int:
         """Get the number of examples in the dataset."""
         return self.data.shape[0]
@@ -281,7 +224,7 @@ class ETHICSDataset(Dataset):
             idx: Index of the example
             
         Returns:
-            Dictionary containing tokenized text, labels, and graph data
+            Dictionary containing tokenized text and labels
         """
         # Get row from DataFrame
         row = self.data.row(idx)
@@ -306,12 +249,6 @@ class ETHICSDataset(Dataset):
         item['manipulation_label'] = torch.tensor([manipulation_label], dtype=torch.float32)
         item['text'] = text
         
-        # Add GraphBrain data if enabled
-        if self.use_graphbrain:
-            graph_data = self._prepare_graph_data(text)
-            for k, v in graph_data.items():
-                item[f'graph_{k}'] = v
-        
         return item
 
 
@@ -325,9 +262,6 @@ class ETHICSMultiDomainDataset(Dataset):
         split: Data split to use (train, test, test_hard)
         tokenizer: HuggingFace tokenizer for text processing
         max_length: Maximum sequence length for tokenization
-        use_graphbrain: Whether to use GraphBrain for semantic hypergraph processing
-        parser_lang: Language for GraphBrain parser
-        cache_graphs: Whether to cache processed graphs
     """
     
     def __init__(
@@ -336,19 +270,13 @@ class ETHICSMultiDomainDataset(Dataset):
         domains: Optional[List[str]] = None,
         split: str = "train",
         tokenizer: PreTrainedTokenizer = None,
-        max_length: int = 128,
-        use_graphbrain: bool = True,
-        parser_lang: str = "en",
-        cache_graphs: bool = True
+        max_length: int = 128
     ):
         self.data_dir = data_dir
         self.domains = domains or DOMAINS
         self.split = split
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.use_graphbrain = use_graphbrain
-        self.parser_lang = parser_lang
-        self.cache_graphs = cache_graphs
         
         # Initialize domain datasets
         self.domain_datasets = {}
@@ -365,10 +293,7 @@ class ETHICSMultiDomainDataset(Dataset):
                     split=split,
                     data_dir=data_dir,
                     tokenizer=tokenizer,
-                    max_length=max_length,
-                    use_graphbrain=use_graphbrain,
-                    parser_lang=parser_lang,
-                    cache_graphs=cache_graphs
+                    max_length=max_length
                 )
                 
                 # Store dataset and indices
@@ -377,7 +302,7 @@ class ETHICSMultiDomainDataset(Dataset):
                 self.total_size += len(dataset)
                 
             except Exception as e:
-                print(f"Error loading {domain} dataset: {e}")
+                logger.error(f"Error loading {domain} dataset: {e}")
                 continue
     
     def __len__(self) -> int:
@@ -416,21 +341,19 @@ class ETHICSMultiDomainDataset(Dataset):
         return item
 
 
-def collate_with_graphs(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+def collate_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Custom collate function for batches with graph data.
+    Custom collate function for batches.
     
     Args:
         batch: List of dataset items
         
     Returns:
-        Batched tensors and graph data
+        Batched tensors
     """
-    # Separate standard items and graph data
-    standard_items = {}
-    graph_data = {}
     texts = []
     domains = []
+    standard_items = {}
     
     for item in batch:
         # Extract text and domain
@@ -438,18 +361,11 @@ def collate_with_graphs(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         if 'domain' in item:
             domains.append(item.pop('domain'))
         
-        # Separate graph data from standard items
-        graph_keys = [k for k in item.keys() if k.startswith('graph_')]
-        
-        for k in item.keys():
-            if k in graph_keys:
-                if k not in graph_data:
-                    graph_data[k] = []
-                graph_data[k].append(item[k])
-            else:
-                if k not in standard_items:
-                    standard_items[k] = []
-                standard_items[k].append(item[k])
+        # Collect standard items
+        for k, v in item.items():
+            if k not in standard_items:
+                standard_items[k] = []
+            standard_items[k].append(v)
     
     # Batch standard items
     batched = {k: torch.stack(v) for k, v in standard_items.items()}
@@ -457,10 +373,6 @@ def collate_with_graphs(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     
     if domains:
         batched['domains'] = domains
-    
-    # Add graph data
-    for k, v in graph_data.items():
-        batched[k] = v
     
     return batched
 
@@ -471,9 +383,6 @@ def create_ethics_dataloaders(
     batch_size: int = 32,
     max_length: int = 128,
     domains: Optional[List[str]] = None,
-    use_graphbrain: bool = True,
-    parser_lang: str = "en",
-    cache_graphs: bool = True,
     num_workers: int = 4
 ) -> Dict[str, DataLoader]:
     """
@@ -485,9 +394,6 @@ def create_ethics_dataloaders(
         batch_size: Batch size for DataLoader
         max_length: Maximum sequence length for tokenization
         domains: List of domains to include (default: all domains)
-        use_graphbrain: Whether to use GraphBrain
-        parser_lang: Language for GraphBrain parser
-        cache_graphs: Whether to cache processed graphs
         num_workers: Number of workers for DataLoader
         
     Returns:
@@ -503,10 +409,7 @@ def create_ethics_dataloaders(
             domains=domains,
             split=split,
             tokenizer=tokenizer,
-            max_length=max_length,
-            use_graphbrain=use_graphbrain,
-            parser_lang=parser_lang,
-            cache_graphs=cache_graphs
+            max_length=max_length
         )
     
     # Create dataloaders
@@ -517,7 +420,7 @@ def create_ethics_dataloaders(
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            collate_fn=collate_with_graphs,
+            collate_fn=collate_batch,
             num_workers=num_workers,
             pin_memory=True
         )
@@ -529,21 +432,18 @@ def create_ethics_dataloaders(
             split="ambiguous",
             data_dir=data_dir,
             tokenizer=tokenizer,
-            max_length=max_length,
-            use_graphbrain=use_graphbrain,
-            parser_lang=parser_lang,
-            cache_graphs=cache_graphs
+            max_length=max_length
         )
         
         dataloaders["ambiguous"] = DataLoader(
             ambiguous_dataset,
             batch_size=batch_size,
             shuffle=False,
-            collate_fn=collate_with_graphs,
+            collate_fn=collate_batch,
             num_workers=num_workers,
             pin_memory=True
         )
     except Exception as e:
-        print(f"Ambiguous dataset not available: {e}")
+        logger.warning(f"Ambiguous dataset not available: {e}")
     
     return dataloaders

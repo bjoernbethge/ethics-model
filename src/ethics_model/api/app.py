@@ -14,7 +14,7 @@ import torch
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 from ..modules.retriever import EthicsModel
 from .app_training import router as training_router
@@ -75,28 +75,28 @@ app.include_router(visualization_router, prefix="/visualization")
 # Input and output models
 class TextInput(BaseModel):
     """Input model for text analysis requests."""
-    text: str = Field(..., 
-                      description="Text to analyze", 
-                      min_length=10, 
-                      max_length=10000, 
-                      example="This is an example text for ethical analysis.")
-    include_details: bool = Field(False, 
-                                 description="Include detailed analysis in response")
-    
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "text": "Companies should prioritize profit over everything else, regardless of ethical concerns.",
                 "include_details": True
             }
         }
+    )
+    
+    text: str = Field(..., 
+                      description="Text to analyze", 
+                      min_length=10, 
+                      max_length=10000)
+    include_details: bool = Field(False, 
+                                 description="Include detailed analysis in response")
 
 
 class TextBatchInput(BaseModel):
     """Input model for batch text analysis."""
     texts: List[str] = Field(..., 
                            description="List of texts to analyze", 
-                           max_items=50)
+                           max_length=50)
     include_details: bool = Field(False, 
                                 description="Include detailed analysis in response")
 

@@ -21,6 +21,8 @@ dependencies = [
     "bitsandbytes",
     "fastapi",
     "uvicorn[standard]",
+    "pydantic-settings",
+    "polars",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +40,22 @@ train = [
     "transformers-stream-generator",
 ]
 dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+]
+full = [
+    "datasets",
+    "hf-transfer",
+    "huggingface-hub",
+    "nlpaug",
+    "optimum",
+    "peft",
+    "pyarrow",
+    "safetensors",
+    "tensorboard",
+    "torch-tb-profiler",
+    "transformers-stream-generator",
     "pytest",
     "pytest-cov",
     "pytest-xdist",

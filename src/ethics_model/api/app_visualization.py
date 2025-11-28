@@ -7,13 +7,13 @@ including attention maps, framework activations, and manipulation detection.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..modules.retriever import EthicsModel
 from .dependencies import get_llm, get_model, get_tokenizer
@@ -28,21 +28,23 @@ router = APIRouter(tags=["Visualization"])
 # Visualization related models
 class VisualizationInput(BaseModel):
     """Input model for visualization requests."""
-    text: str = Field(..., 
-                    description="Text to visualize", 
-                    min_length=10, 
-                    max_length=10000)
-    visualization_type: str = Field(..., 
-                                  description="Type of visualization to generate",
-                                  enum=["attention", "frameworks", "manipulation", "framing", "dissonance"])
-    
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "text": "Companies should prioritize profit over everything else, regardless of ethical concerns.",
                 "visualization_type": "frameworks"
             }
         }
+    )
+    
+    text: str = Field(..., 
+                    description="Text to visualize", 
+                    min_length=10, 
+                    max_length=10000)
+    visualization_type: Literal["attention", "frameworks", "manipulation", "framing", "dissonance"] = Field(
+        ..., 
+        description="Type of visualization to generate"
+    )
 
 
 class VisualizationOutput(BaseModel):

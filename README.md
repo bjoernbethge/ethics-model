@@ -11,7 +11,7 @@ uv sync --extra full
 ```
 
 That's it! This installs:
-- PyTorch 2.9.0+ with CUDA 12.8
+- PyTorch 2.8.0+ with CUDA 12.8
 - PyTorch Geometric 2.7.0
 - All training dependencies (transformers, peft, accelerate, etc.)
 - GRetriever dependencies (pcst_fast, sentencepiece)
@@ -25,7 +25,7 @@ pytest tests/
 ---
 
 ## Features
-- **Modern PyTorch 2.9+**: torch.compile() enabled by default (3-5× speedup)
+- **Modern PyTorch 2.8+**: torch.compile() enabled by default (3-5× speedup)
 - **PyTorch Geometric 2.7.0**: GATv2Conv, EdgeIndex optimization, variance-preserving aggregation
 - **GRetriever Integration**: LLM + GNN knowledge graph reasoning with Qwen3-3B-Instruct
 - Modular architecture for ethical reasoning and manipulation detection
@@ -58,7 +58,7 @@ pytest tests/
 |                      | `NarrativeManipulationDetector`| `technique_scores`, `aggregate_score`, `confidence`, `manipulation_map`              | Detects manipulation techniques, aggregates and calibrates scores                                 |
 |                      | `PropagandaDetector`           | `technique_matches`, `intensity_score`, `credibility_score`, `inverse_credibility`   | Detects propaganda techniques, scores intensity and credibility                                   |
 |                      | `NarrativeGraphLayer`          | Activated graph features                                                             | GCNConv for narrative graphs                                                                      |
-| `ethics.py`          | `EthicsModel`                  | See below                                                                            | Integrates all modules, orchestrates full analysis                                                |
+| `retriever.py`       | `EthicsModel`                  | See below                                                                            | Integrates all modules, orchestrates full analysis                                                |
 
 #### EthicsModel Output Dictionary
 The main model (`EthicsModel`) returns a dictionary with the following keys:
@@ -83,8 +83,7 @@ All core model components (custom `nn.Module` classes, layers, blocks, architect
 - **Extendability:** Add your own layers or architectures by creating new files in `modules/` and importing them.
 - **Usage Example:**
   ```python
-  from ethics_model.modules.gnn import EthicsGNN, EthicsGNNConfig, create_ethics_gnn
-  from ethics_model.modules.retriever import EthicsModel
+  from ethics_model import EthicsModel, EthicsGNN, EthicsGNNConfig, create_ethics_gnn
   
   # Create graph-native GNN
   config = EthicsGNNConfig(hidden_dim=256, num_layers=2, num_heads=4)

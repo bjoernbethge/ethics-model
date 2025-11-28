@@ -20,7 +20,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ..data import EthicsDataset
+from ..ethics_dataset import EthicsDataset
 from ..modules.retriever import EthicsModel
 from ..training import train
 from .dependencies import get_llm, get_model, get_tokenizer
@@ -35,37 +35,37 @@ router = APIRouter(tags=["Training"])
 # Training related models
 class TrainingInput(BaseModel):
     """Input model for training requests."""
-    train_texts: List[str] = Field(..., 
-                                 description="Training texts", 
-                                 min_items=10, 
-                                 max_items=1000)
-    ethics_labels: List[float] = Field(..., 
+    train_texts: List[str] = Field(...,
+                                 description="Training texts",
+                                 min_length=10,
+                                 max_length=1000)
+    ethics_labels: List[float] = Field(...,
                                      description="Ethics scores for training texts")
-    manipulation_labels: List[float] = Field(..., 
+    manipulation_labels: List[float] = Field(...,
                                            description="Manipulation scores for training texts")
-    validation_split: float = Field(0.2, 
+    validation_split: float = Field(0.2,
                                    description="Validation split ratio",
                                    ge=0.0,
                                    le=0.5)
-    epochs: int = Field(5, 
+    epochs: int = Field(5,
                        description="Number of training epochs",
                        ge=1,
                        le=100)
-    batch_size: int = Field(16, 
+    batch_size: int = Field(16,
                            description="Training batch size",
                            ge=1)
-    learning_rate: float = Field(1e-4, 
+    learning_rate: float = Field(1e-4,
                                description="Learning rate",
                                gt=0.0)
     augment: bool = Field(False,
                          description="Whether to use data augmentation")
     checkpoint_name: Optional[str] = Field(None,
                                          description="Name to save the checkpoint as")
-    model_config: Optional[Dict[str, Any]] = Field(None,
+    ethics_model_config: Optional[Dict[str, Any]] = Field(None,
                                                 description="Optional model configuration parameters")
-    
-    class Config:
-        schema_extra = {
+
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "train_texts": ["Text 1", "Text 2", "..."],
                 "ethics_labels": [0.8, 0.2, "..."],
@@ -77,6 +77,7 @@ class TrainingInput(BaseModel):
                 "checkpoint_name": "my_model_checkpoint"
             }
         }
+    }
 
 
 class TrainingStatusResponse(BaseModel):
@@ -173,7 +174,7 @@ async def train_model(
         learning_rate=input_data.learning_rate,
         augment=input_data.augment,
         checkpoint_path=checkpoint_path,
-        model_config=input_data.model_config,
+        model_config=input_data.ethics_model_config,
         model=model,
         tokenizer=tokenizer,
         llm=llm,
@@ -294,7 +295,7 @@ def _run_training_task(
     from sklearn.model_selection import train_test_split
     from torch.utils.tensorboard import SummaryWriter
 
-    from ..data import EthicsDataset
+    from ..ethics_dataset import EthicsDataset
 
     try:
         # Update task status
@@ -304,20 +305,17 @@ def _run_training_task(
         # Initialize augmentation if needed
         synonym_augment_fn = None
         if augment:
-            try:
-                import nlpaug.augmenter.word as naw
-                aug = naw.SynonymAug(aug_src='wordnet')
-                
-                def synonym_augment(text):
-                    try:
-                        return aug.augment(text)
-                    except Exception:
-                        return text
-                
-                synonym_augment_fn = synonym_augment
-                logger.info("Data augmentation enabled with synonym replacement")
-            except ImportError:
-                logger.warning("nlpaug package not found. Data augmentation disabled.")
+            import nlpaug.augmenter.word as naw
+            aug = naw.SynonymAug(aug_src='wordnet')
+            
+            def synonym_augment(text):
+                try:
+                    return aug.augment(text)
+                except Exception:
+                    return text
+            
+            synonym_augment_fn = synonym_augment
+            logger.info("Data augmentation enabled with synonym replacement")
         
         # Create a copy of the model for training (or create a new one if model_config is provided)
         if model_config:
@@ -340,8 +338,8 @@ def _run_training_task(
                 n_heads=model.ethical_attention.n_heads,
                 vocab_size=model.embedding.num_embeddings,
                 max_seq_length=settings.max_sequence_length,
-                activation=settings.model_config.get("activation", "gelu"),
-                use_gnn=settings.model_config.get("use_gnn", False)
+                activation=settings.ethics_model_config.get("activation", "gelu"),
+                use_gnn=settings.ethics_model_config.get("use_gnn", False)
             ).to(settings.device)
         
         # Create optimizer

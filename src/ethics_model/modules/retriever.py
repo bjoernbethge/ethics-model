@@ -20,7 +20,7 @@ class EthicsModel(GRetriever):
         gnn_dropout: float = 0.1,
         use_lora: bool = True,
         mlp_out_tokens: int = 1,
-        activation: str = "gelu"
+        activation: str = "silu"
     ) -> None:
         """
         Initialize EthicsModel with GRetriever.
@@ -57,17 +57,6 @@ class EthicsModel(GRetriever):
             use_lora=use_lora,
             mlp_out_tokens=mlp_out_tokens,
         )
-
-    def _build_gnn(self, *_, **__):
-        """Backward compatibility stub."""
-        raise NotImplementedError(
-            "EthicsModel uses EthicsGNN internally; "
-            "no manual GNN stack here."
-        )
-
-    def forward(self, *args, **kwargs):
-        # Defer to GRetriever forward
-        return super().forward(*args, **kwargs)
 
     def get_framework_names(self) -> list[str]:
         """Returns names of the 5 moral frameworks in order."""

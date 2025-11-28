@@ -15,18 +15,18 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
-    
+
     # API server settings
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
-    
+
     # Model settings
     model_path: Optional[str] = None
     checkpoint_path: Optional[str] = None
     tokenizer_name: str = "gpt2"
     llm_name: str = "gpt2"
-    model_config: dict = {
+    ethics_model_config: dict = {
         "input_dim": 512,
         "d_model": 512,
         "n_layers": 6,
@@ -36,18 +36,19 @@ class Settings(BaseSettings):
         "activation": "gelu",
         "use_gnn": False
     }
-    
+
     # Processing settings
     max_sequence_length: int = 512
     batch_size: int = 4
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    
+
     # Storage settings
     cache_dir: str = "./cache"
-    
-    class Config:
-        env_prefix = "ETHICS_API_"
-        env_file = ".env"
+
+    model_config = {
+        "env_prefix": "ETHICS_API_",
+        "env_file": ".env"
+    }
 
 
 @lru_cache

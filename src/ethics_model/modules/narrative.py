@@ -22,7 +22,7 @@ class FramingDetector(MessagePassing):
     def __init__(
         self,
         d_model: int,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         super().__init__(aggr='mean', flow='source_to_target')
         
@@ -100,7 +100,7 @@ class CognitiveDissonanceLayer(MessagePassing):
         self,
         d_model: int,
         n_moral_values: int = 8,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         super().__init__(aggr='mean', flow='source_to_target')
         
@@ -164,11 +164,11 @@ class NarrativeManipulationDetector(MessagePassing):
     Comprehensive detector for various manipulation techniques in narratives
     including emotional appeals, logical fallacies, and framing biases.
     """
-    
+
     def __init__(
         self,
         d_model: int,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         super().__init__(aggr='mean', flow='source_to_target')
         
@@ -237,7 +237,7 @@ class PropagandaDetector(MessagePassing):
     def __init__(
         self,
         d_model: int,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         super().__init__(aggr='mean', flow='source_to_target')
         
@@ -295,7 +295,7 @@ class NarrativeGraphLayer(nn.Module):
     Modern GNN layer for narrative graph structures using EdgeIndex optimization.
     Processes narrative framing, manipulation patterns, and discourse structure.
     """
-    def __init__(self, in_channels: int, out_channels: int, activation: str = "gelu"):
+    def __init__(self, in_channels: int, out_channels: int, activation: str = "silu"):
         super().__init__()
         self.gcn = GCNConv(in_channels, out_channels)
         self.activation = get_activation(activation)

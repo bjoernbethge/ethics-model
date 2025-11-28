@@ -92,7 +92,7 @@ class EthicalCrossDomainLayer(MessagePassing):
         self,
         d_model: int,
         n_domains: int = 4,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         from torch_geometric.nn import GATv2Conv
         super().__init__(aggr='mean', flow='source_to_target')
@@ -154,7 +154,7 @@ class MultiFrameworkProcessor(MessagePassing):
         self,
         d_model: int,
         n_frameworks: int = 5,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         super().__init__(aggr='mean', flow='source_to_target')
         
@@ -231,8 +231,8 @@ class EthicalPrincipleEncoder(nn.Module):
         
         # Principle embeddings
         self.principle_embeddings = nn.Embedding(n_principles, d_model)
-        
-        # Principle interaction matrix - angepasst für die korrekte Größe
+
+        # Principle interaction matrix - adjusted for correct size
         self.principle_interaction = nn.Parameter(
             torch.randn(d_model, d_model)
         )
@@ -275,7 +275,7 @@ class MoralFrameworkGraphLayer(nn.Module):
     Modern GNN layer for moral framework graphs using variance-preserving aggregation.
     Prevents over-smoothing in deep moral reasoning hierarchies.
     """
-    def __init__(self, in_channels: int, out_channels: int, activation: str = "gelu"):
+    def __init__(self, in_channels: int, out_channels: int, activation: str = "silu"):
         super().__init__()
         self.gcn = GCNConv(in_channels, out_channels,
                            aggr=VariancePreservingAggregation())

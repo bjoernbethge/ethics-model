@@ -53,6 +53,7 @@ ENV/
 !.vscode/tasks.json
 !.vscode/settings.json
 *.code-workspace
+.cursor/plans/
 
 # Model checkpoints and outputs
 checkpoints/*

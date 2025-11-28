@@ -5,11 +5,16 @@ This module provides integration with the Instructor library to create
 structured reasoning models for ethical analysis.
 """
 
+import logging
 import torch
 import torch.nn as nn
 from typing import Dict, List, Optional, Tuple, Any, Union
 from pydantic import BaseModel, Field, validator
 import instructor
+
+from .activation import RMSNorm
+
+logger = logging.getLogger(__name__)
 
 
 class EthicalFramework(BaseModel):
@@ -101,7 +106,7 @@ class StructuredReasoningProcessor(nn.Module):
         # Fusion layer to combine instructor outputs with model predictions
         self.fusion_layer = nn.Sequential(
             nn.Linear(d_model * 2, d_model),
-            nn.LayerNorm(d_model),
+            RMSNorm(d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model)
         )
@@ -154,7 +159,7 @@ class StructuredReasoningProcessor(nn.Module):
                 
             return response
         except Exception as e:
-            print(f"Error getting structured analysis: {e}")
+            logger.error(f"Error getting structured analysis: {e}")
             return None
     
     def convert_to_tensors(self, 
@@ -206,7 +211,7 @@ class StructuredReasoningProcessor(nn.Module):
             
         Returns:
             Dictionary containing:
-                - structured_embeddings: Enhanced embeddings with structured reasoning
+                - structured_embeddings: Embeddings with structured reasoning
                 - ethics_score: Ethics scores from structured analysis
                 - manipulation_score: Manipulation scores from structured analysis
         """

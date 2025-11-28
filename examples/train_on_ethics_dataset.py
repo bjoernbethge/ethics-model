@@ -1,26 +1,36 @@
 """
 Ethics Model Training on ETHICS Dataset
 
-This script trains the enhanced ethics model on the ETHICS dataset
+This script trains the ethics model on the ETHICS dataset
 from Hendrycks et al. (2021), using CUDA optimizations for efficiency.
 """
 
+import argparse
+import logging
 import os
+from datetime import datetime
+
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer, AutoModel
-from ethics_model.model import create_ethics_model
+
+from ethics_model import EthicsModel
 from ethics_model.ethics_dataset import create_ethics_dataloaders
-from ethics_model.cuda_training import train_ethics_model
-import argparse
-from datetime import datetime
+from ethics_model.training import train_ethics_model
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 def main(args):
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() and not args.cpu else 'cpu')
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
     
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -31,40 +41,29 @@ def main(args):
     writer = SummaryWriter(log_dir=os.path.join(output_dir, "logs"))
     
     # Load LLM model and tokenizer
-    print(f"Loading {args.llm_model}...")
+    logger.info(f"Loading {args.llm_model}...")
     tokenizer = AutoTokenizer.from_pretrained(args.llm_model)
     llm = AutoModel.from_pretrained(args.llm_model).to(device)
     
     # Create dataloaders
-    print(f"Loading ETHICS dataset from {args.data_dir}...")
+    logger.info(f"Loading ETHICS dataset from {args.data_dir}...")
     dataloaders = create_ethics_dataloaders(
         data_dir=args.data_dir,
         tokenizer=tokenizer,
         batch_size=args.batch_size,
         max_length=args.max_length,
         domains=args.domains.split(",") if args.domains else None,
-        use_graphbrain=not args.disable_graphbrain,
-        parser_lang=args.parser_lang,
-        cache_graphs=True,
         num_workers=args.num_workers
     )
     
     # Create ethics model
-    print("Creating ethics model...")
-    model_config = {
-        'input_dim': llm.config.hidden_size,
-        'd_model': args.d_model,
-        'n_layers': args.n_layers,
-        'n_heads': args.n_heads,
-        'vocab_size': tokenizer.vocab_size,
-        'max_seq_length': args.max_length,
-        'activation': args.activation,
-        'use_gnn': True,
-        'use_graphbrain': not args.disable_graphbrain,
-        'parser_lang': args.parser_lang
-    }
-    
-    model = create_ethics_model(model_config)
+    logger.info("Creating ethics model...")
+    model = EthicsModel(
+        gnn_hidden_dim=args.d_model,
+        num_gnn_layers=args.n_layers,
+        gnn_num_heads=args.n_heads,
+        activation=args.activation
+    )
     
     # Create optimizer
     optimizer = torch.optim.AdamW(
@@ -80,7 +79,7 @@ def main(args):
     checkpoint_path = os.path.join(output_dir, "best_model.pt")
     
     # Train model
-    print("Starting training...")
+    logger.info("Starting training...")
     model = train_ethics_model(
         model=model,
         llm=llm,
@@ -105,17 +104,22 @@ def main(args):
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'config': model_config
+        'config': {
+            'gnn_hidden_dim': args.d_model,
+            'num_gnn_layers': args.n_layers,
+            'gnn_num_heads': args.n_heads,
+            'activation': args.activation
+        }
     }, final_model_path)
     
-    print(f"Training completed. Model saved to {final_model_path}")
+    logger.info(f"Training completed. Model saved to {final_model_path}")
     
     # Close TensorBoard writer
     writer.close()
     
     # Test on ambiguous examples if available
     if 'ambiguous' in dataloaders:
-        print("\nEvaluating on ambiguous examples...")
+        logger.info("Evaluating on ambiguous examples...")
         model.eval()
         total = 0
         uncertain = 0  # Count examples where prediction is close to 0.5
@@ -135,8 +139,7 @@ def main(args):
                 outputs = model(
                     embeddings=hidden_states,
                     attention_mask=batch['attention_mask'],
-                    texts=batch.get('texts'),
-                    graph_data={k: v for k, v in batch.items() if k.startswith('graph_')}
+                    texts=batch.get('texts')
                 )
                 
                 ethics_score = outputs['ethics_score']
@@ -146,9 +149,9 @@ def main(args):
                 total += ethics_score.size(0)
         
         uncertainty_rate = uncertain / total
-        print(f"Uncertainty rate on ambiguous examples: {uncertainty_rate:.4f}")
-        print(f"Number of ambiguous examples: {total}")
-        print(f"Number of uncertain predictions: {uncertain}")
+        logger.info(f"Uncertainty rate on ambiguous examples: {uncertainty_rate:.4f}")
+        logger.info(f"Number of ambiguous examples: {total}")
+        logger.info(f"Number of uncertain predictions: {uncertain}")
 
 
 if __name__ == "__main__":
@@ -199,10 +202,6 @@ if __name__ == "__main__":
                         help="Number of dataloader workers")
     
     # Other options
-    parser.add_argument("--disable_graphbrain", action="store_true",
-                        help="Disable GraphBrain semantic hypergraphs")
-    parser.add_argument("--parser_lang", type=str, default="en",
-                        help="Language for GraphBrain parser")
     parser.add_argument("--cpu", action="store_true",
                         help="Force CPU usage")
     

@@ -25,7 +25,7 @@ class EthicsGNNConfig:
     num_layers: int = 2
     num_heads: int = 4
     dropout: float = 0.1
-    activation: Literal["gelu", "swish", "mish", "reca", "silu"] = "gelu"
+    activation: Literal["gelu", "swish", "mish", "reca", "silu"] = "silu"
     use_ethics_modules: bool = True
 
 

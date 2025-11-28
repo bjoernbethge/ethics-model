@@ -13,7 +13,7 @@ Components:
 - FastAPI-based Inference API
 """
 
-from .modules.activation import ReCA, get_activation
+from .modules.activation import ReCA, RMSNorm, SwiGLU, get_activation
 from .modules.attention import (
     DoubleProcessingAttention,
     EthicalAttention,
@@ -21,6 +21,8 @@ from .modules.attention import (
     MoralIntuitionAttention,
     NarrativeFrameAttention,
 )
+from .modules.gqa import EthicalGQA, GroupedQueryAttention
+from .modules.rope import RotaryPositionEmbedding, apply_rope
 from .modules.gnn import EthicsGNN, EthicsGNNConfig, create_ethics_gnn
 from .modules.moral import (
     EthicalCrossDomainLayer,
@@ -36,11 +38,10 @@ from .modules.narrative import (
 )
 from .modules.retriever import EthicsModel
 
-# Optional API imports
+# API imports (optional, only if FastAPI is available)
 try:
     from .api import app as api_app
 except ImportError:
-    # FastAPI may not be installed
     api_app = None
 
 __all__ = [
@@ -58,13 +59,27 @@ __all__ = [
     'EthicsGNN',
     'EthicsGNNConfig',
     'create_ethics_gnn',
+
+    # Activation and Normalization
     'get_activation',
     'ReCA',
+    'RMSNorm',
+    'SwiGLU',
+
+    # Attention mechanisms
     'GraphAttentionLayer',
     'DoubleProcessingAttention',
+    'GroupedQueryAttention',
+    'EthicalGQA',
+
+    # Position encoding
+    'RotaryPositionEmbedding',
+    'apply_rope',
+
+    # Narrative components
     'PropagandaDetector',
     'NarrativeGraphLayer',
-    
+
     # API components
     'api_app'
 ]

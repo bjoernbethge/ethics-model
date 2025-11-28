@@ -35,9 +35,6 @@ RUN uv pip install torch==2.6.0+cu126 --index-url https://download.pytorch.org/w
 # Install bitsandbytes for Windows (as specified in pyproject.toml)
 RUN uv pip install --force-reinstall "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl"
 
-# Install SpaCy language model for GraphBrain
-RUN python -m spacy download en_core_web_sm
-
 # Test CUDA availability (will output to build logs)
 RUN python -c "import torch; print('PyTorch:', torch.__version__, 'CUDA:', torch.version.cuda, 'CUDA Available:', torch.cuda.is_available())"
 

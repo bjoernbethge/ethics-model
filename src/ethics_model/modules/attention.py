@@ -12,7 +12,7 @@ import torch.nn as nn
 from torch_geometric import EdgeIndex
 from torch_geometric.nn import GATv2Conv, MessagePassing
 
-from .activation import get_activation
+from .activation import RMSNorm, get_activation
 
 
 class EthicalAttention(MessagePassing):
@@ -24,7 +24,7 @@ class EthicalAttention(MessagePassing):
         d_model: int,
         n_heads: int = 8,
         dropout: float = 0.1,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         super().__init__(aggr='mean', flow='source_to_target')
         
@@ -88,7 +88,7 @@ class MoralIntuitionAttention(MessagePassing):
         self,
         d_model: int,
         n_moral_foundations: int = 6,
-        activation: str = "gelu",
+        activation: str = "silu",
     ):
         from torch_geometric.nn import GCNConv
         super().__init__(aggr='mean', flow='source_to_target')
@@ -153,11 +153,11 @@ class NarrativeFrameAttention(nn.Module):
     and manipulative communication patterns.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  d_model: int,
                  n_frame_types: int = 5,
                  manipulation_threshold: float = 0.7,
-                 activation: str = "gelu"):
+                 activation: str = "silu"):
         super().__init__()
         
         self.activation = get_activation(activation)
@@ -235,12 +235,12 @@ class DoubleProcessingAttention(nn.Module):
     fast (System 1) and slow (System 2) processing pathways.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  d_model: int,
                  n_heads: int = 8,
                  system1_latency: int = 2,
                  system2_latency: int = 8,
-                 activation: str = "gelu"):
+                 activation: str = "silu"):
         super().__init__()
         
         self.activation = get_activation(activation)
@@ -322,7 +322,7 @@ class GraphAttentionLayer(nn.Module):
     GATv2Conv provides dynamic attention (better than static GAT).
     """
     def __init__(self, in_channels: int, out_channels: int, heads: int = 1,
-                 activation: str = "gelu", dropout: float = 0.1):
+                 activation: str = "silu", dropout: float = 0.1):
         super().__init__()
         self.gat = GATv2Conv(in_channels, out_channels, heads=heads,
                              concat=False, dropout=dropout)

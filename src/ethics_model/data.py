@@ -8,10 +8,16 @@ for GraphBrain and Instructor integrations.
 import torch
 from torch.utils.data import Dataset
 from typing import List, Dict, Optional, Any, Union, Callable
-import graphbrain as gb
 from graphbrain import hgraph
 import random
 from tqdm import tqdm
+
+from .common import (
+    collate_with_graphs,
+    GraphBrainParserManager,
+    process_text_to_hypergraph,
+    prepare_graph_data_for_model
+)
 
 
 class MultiTaskDataset(Dataset):
@@ -122,7 +128,7 @@ class EnhancedEthicsDataset(MultiTaskDataset):
         
         # Initialize GraphBrain parser if needed
         self.parser = None
-        self.graph_cache = {}
+        self.graph_cache: Dict[str, Any] = {}
         
         if use_graphbrain:
             self._init_parser()
@@ -134,14 +140,10 @@ class EnhancedEthicsDataset(MultiTaskDataset):
                     self._process_text_to_graph(text)
     
     def _init_parser(self):
-        """Initialize GraphBrain parser."""
+        """Initialize GraphBrain parser using shared manager."""
         if self.parser is None and self.use_graphbrain:
-            try:
-                self.parser = gb.Parser(model=f"{self.parser_lang}_core_web_sm")
-            except Exception as e:
-                print(f"Error initializing GraphBrain parser: {e}")
-                print("Make sure you've installed the required language model:")
-                print(f"python -m spacy download {self.parser_lang}_core_web_sm")
+            self.parser = GraphBrainParserManager.get_parser(self.parser_lang)
+            if self.parser is None:
                 self.use_graphbrain = False
     
     def _process_text_to_graph(self, text: str) -> Optional[hgraph]:
@@ -154,29 +156,15 @@ class EnhancedEthicsDataset(MultiTaskDataset):
             return self.graph_cache[text]
             
         self._init_parser()
-        if self.parser is None:
-            return None
-            
-        try:
-            # Create hypergraph
-            hg = hgraph()
-            
-            # Parse text and add to hypergraph
-            for sentence in text.split('.'):
-                if sentence.strip():
-                    parse = self.parser.parse(sentence)
-                    hg.add(parse)
-                    
-            # Cache result
-            if self.cache_graphs:
-                self.graph_cache[text] = hg
+        hg = process_text_to_hypergraph(text, self.parser, self.parser_lang)
+        
+        # Cache result
+        if self.cache_graphs and hg is not None:
+            self.graph_cache[text] = hg
                 
-            return hg
-        except Exception as e:
-            print(f"Error processing text to graph: {e}")
-            return None
+        return hg
     
-    def _prepare_graph_data(self, hg: hgraph) -> Dict[str, Any]:
+    def _prepare_graph_data(self, hg: Optional[hgraph]) -> Dict[str, Any]:
         """
         Prepare graph data for model input.
         
@@ -186,62 +174,7 @@ class EnhancedEthicsDataset(MultiTaskDataset):
         Returns:
             Dictionary with graph data
         """
-        if hg is None:
-            return {'has_graph': False}
-            
-        # Extract nodes (atoms)
-        nodes = list(hg.all_atoms())
-        
-        # Create node map for edge index creation
-        node_map = {node: i for i, node in enumerate(nodes)}
-        
-        # Create edge index
-        edge_index = []
-        edge_types = []
-        
-        # Extract edges
-        for edge in hg.all_edges():
-            if len(edge) > 1:
-                pred = edge[0]  # Predicate is typically first
-                
-                if gb.is_atom(pred):
-                    pred_idx = node_map.get(pred)
-                    
-                    if pred_idx is not None:
-                        # Connect predicate to all arguments
-                        for i in range(1, len(edge)):
-                            if gb.is_atom(edge[i]):
-                                arg_idx = node_map.get(edge[i])
-                                
-                                if arg_idx is not None:
-                                    # Add bidirectional connections
-                                    edge_index.append([pred_idx, arg_idx])
-                                    edge_index.append([arg_idx, pred_idx])
-                                    
-                                    # Add edge types (simplified)
-                                    edge_type = 0  # Default
-                                    edge_types.append(edge_type)
-                                    edge_types.append(edge_type)
-        
-        # Convert to tensors
-        if edge_index:
-            edge_index_tensor = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-            edge_types_tensor = torch.tensor(edge_types, dtype=torch.long)
-        else:
-            # Empty graph fallback
-            edge_index_tensor = torch.zeros((2, 0), dtype=torch.long)
-            edge_types_tensor = torch.zeros(0, dtype=torch.long)
-        
-        # Simple node features (one-hot encoding)
-        node_features = torch.eye(len(nodes))
-        
-        return {
-            'has_graph': True,
-            'nodes': nodes,
-            'node_features': node_features,
-            'edge_index': edge_index_tensor,
-            'edge_types': edge_types_tensor
-        }
+        return prepare_graph_data_for_model(hg)
     
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         # Get base item from parent class
@@ -262,46 +195,3 @@ class EnhancedEthicsDataset(MultiTaskDataset):
         # rather than dataset loading for efficiency
         
         return item
-
-
-def collate_with_graphs(batch):
-    """
-    Custom collate function for batches with graph data.
-    
-    Args:
-        batch: List of dataset items
-        
-    Returns:
-        Batched tensors and graph data
-    """
-    # Separate standard items and graph data
-    standard_items = {}
-    graph_data = {}
-    texts = []
-    
-    for item in batch:
-        # Extract text
-        texts.append(item.pop('text'))
-        
-        # Separate graph data from standard items
-        graph_keys = [k for k in item.keys() if k.startswith('graph_')]
-        
-        for k in item.keys():
-            if k in graph_keys:
-                if k not in graph_data:
-                    graph_data[k] = []
-                graph_data[k].append(item[k])
-            else:
-                if k not in standard_items:
-                    standard_items[k] = []
-                standard_items[k].append(item[k])
-    
-    # Batch standard items
-    batched = {k: torch.stack(v) for k, v in standard_items.items()}
-    batched['texts'] = texts
-    
-    # Add graph data
-    for k, v in graph_data.items():
-        batched[k] = v
-    
-    return batched

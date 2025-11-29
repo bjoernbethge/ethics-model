@@ -80,6 +80,87 @@ class CUDAGraphTrainer:
         else:
             self.streams = None
     
+    def _compute_forward_and_loss(
+        self,
+        hidden_states: torch.Tensor,
+        batch: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Compute model forward pass and loss.
+        
+        Args:
+            hidden_states: Hidden states from LLM
+            batch: Batch data
+            
+        Returns:
+            Tuple of (outputs, loss, loss_ethics, loss_manip)
+        """
+        outputs = self.model(
+            embeddings=hidden_states,
+            attention_mask=batch['attention_mask'],
+            texts=batch.get('texts'),
+            graph_data={k: v for k, v in batch.items() if k.startswith('graph_')}
+        )
+        
+        ethics_score = outputs['ethics_score']
+        manipulation_score = outputs['manipulation_score']
+        
+        loss_ethics = self.criterion(ethics_score, batch['ethics_label'])
+        loss_manip = self.criterion(manipulation_score, batch['manipulation_label'])
+        
+        loss = loss_ethics + 0.5 * loss_manip
+        
+        return outputs, loss, loss_ethics, loss_manip
+    
+    def _backward_and_optimize(self, loss: torch.Tensor) -> None:
+        """
+        Perform backward pass and optimization step.
+        
+        Args:
+            loss: Loss tensor
+        """
+        if self.use_amp:
+            self.scaler.scale(loss).backward()
+            
+            if self.grad_clip:
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            
+            if self.grad_clip:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            
+            self.optimizer.step()
+    
+    def _get_llm_hidden_states(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Get hidden states from the LLM.
+        
+        Args:
+            input_ids: Input token IDs
+            
+        Returns:
+            Hidden states tensor
+        """
+        with torch.no_grad():
+            llm_outputs = self.llm.model.transformer(input_ids) if hasattr(self.llm, 'model') else self.llm.transformer(input_ids)
+            return llm_outputs.last_hidden_state
+    
+    def _move_batch_to_device(self, batch: Dict[str, Any]) -> None:
+        """
+        Move batch tensors to the device in-place.
+        
+        Args:
+            batch: Batch data dictionary
+        """
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                batch[k] = v.to(self.device)
+
     def _prepare_static_batch(self, dataloader: DataLoader) -> Dict[str, Any]:
         """
         Prepare a static batch for CUDA Graph capture.
@@ -254,15 +335,11 @@ class CUDAGraphTrainer:
             Dictionary of loss values
         """
         # Move batch to device
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                batch[k] = v.to(self.device)
+        self._move_batch_to_device(batch)
         
         # Process LLM in stream 1
         with torch.cuda.stream(self.streams['llm']):
-            with torch.no_grad():
-                llm_outputs = self.llm.model.transformer(batch['input_ids']) if hasattr(self.llm, 'model') else self.llm.transformer(batch['input_ids'])
-                hidden_states = llm_outputs.last_hidden_state
+            hidden_states = self._get_llm_hidden_states(batch['input_ids'])
         
         # Wait for LLM to finish
         self.streams['ethics'].wait_stream(self.streams['llm'])
@@ -273,53 +350,12 @@ class CUDAGraphTrainer:
             
             if self.use_amp:
                 with amp.autocast():
-                    outputs = self.model(
-                        embeddings=hidden_states,
-                        attention_mask=batch['attention_mask'],
-                        texts=batch.get('texts'),
-                        graph_data={k: v for k, v in batch.items() if k.startswith('graph_')}
-                    )
-                    
-                    ethics_score = outputs['ethics_score']
-                    manipulation_score = outputs['manipulation_score']
-                    
-                    loss_ethics = self.criterion(ethics_score, batch['ethics_label'])
-                    loss_manip = self.criterion(manipulation_score, batch['manipulation_label'])
-                    
-                    loss = loss_ethics + 0.5 * loss_manip
+                    _, loss, loss_ethics, loss_manip = self._compute_forward_and_loss(hidden_states, batch)
                 
-                # Backward pass with AMP
-                self.scaler.scale(loss).backward()
-                
-                if self.grad_clip:
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                self._backward_and_optimize(loss)
             else:
-                outputs = self.model(
-                    embeddings=hidden_states,
-                    attention_mask=batch['attention_mask'],
-                    texts=batch.get('texts'),
-                    graph_data={k: v for k, v in batch.items() if k.startswith('graph_')}
-                )
-                
-                ethics_score = outputs['ethics_score']
-                manipulation_score = outputs['manipulation_score']
-                
-                loss_ethics = self.criterion(ethics_score, batch['ethics_label'])
-                loss_manip = self.criterion(manipulation_score, batch['manipulation_label'])
-                
-                loss = loss_ethics + 0.5 * loss_manip
-                
-                # Backward pass
-                loss.backward()
-                
-                if self.grad_clip:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                
-                self.optimizer.step()
+                _, loss, loss_ethics, loss_manip = self._compute_forward_and_loss(hidden_states, batch)
+                self._backward_and_optimize(loss)
         
         # Synchronize for metrics calculation
         torch.cuda.synchronize()
@@ -341,67 +377,22 @@ class CUDAGraphTrainer:
             Dictionary of loss values
         """
         # Move batch to device
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                batch[k] = v.to(self.device)
+        self._move_batch_to_device(batch)
         
         # Forward LLM
-        with torch.no_grad():
-            llm_outputs = self.llm.model.transformer(batch['input_ids']) if hasattr(self.llm, 'model') else self.llm.transformer(batch['input_ids'])
-            hidden_states = llm_outputs.last_hidden_state
+        hidden_states = self._get_llm_hidden_states(batch['input_ids'])
         
-        # Forward ethics model
+        # Forward ethics model and compute loss
         self.optimizer.zero_grad()
         
         if self.use_amp:
             with amp.autocast():
-                outputs = self.model(
-                    embeddings=hidden_states,
-                    attention_mask=batch['attention_mask'],
-                    texts=batch.get('texts'),
-                    graph_data={k: v for k, v in batch.items() if k.startswith('graph_')}
-                )
-                
-                ethics_score = outputs['ethics_score']
-                manipulation_score = outputs['manipulation_score']
-                
-                loss_ethics = self.criterion(ethics_score, batch['ethics_label'])
-                loss_manip = self.criterion(manipulation_score, batch['manipulation_label'])
-                
-                loss = loss_ethics + 0.5 * loss_manip
+                _, loss, loss_ethics, loss_manip = self._compute_forward_and_loss(hidden_states, batch)
             
-            # Backward pass with AMP
-            self.scaler.scale(loss).backward()
-            
-            if self.grad_clip:
-                self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-            
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            self._backward_and_optimize(loss)
         else:
-            outputs = self.model(
-                embeddings=hidden_states,
-                attention_mask=batch['attention_mask'],
-                texts=batch.get('texts'),
-                graph_data={k: v for k, v in batch.items() if k.startswith('graph_')}
-            )
-            
-            ethics_score = outputs['ethics_score']
-            manipulation_score = outputs['manipulation_score']
-            
-            loss_ethics = self.criterion(ethics_score, batch['ethics_label'])
-            loss_manip = self.criterion(manipulation_score, batch['manipulation_label'])
-            
-            loss = loss_ethics + 0.5 * loss_manip
-            
-            # Backward pass
-            loss.backward()
-            
-            if self.grad_clip:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-            
-            self.optimizer.step()
+            _, loss, loss_ethics, loss_manip = self._compute_forward_and_loss(hidden_states, batch)
+            self._backward_and_optimize(loss)
         
         return {
             'loss': loss.item(),

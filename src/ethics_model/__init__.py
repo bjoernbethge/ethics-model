@@ -18,6 +18,7 @@ from .modules.attention import EthicalAttention, MoralIntuitionAttention, Narrat
 from .modules.narrative import NarrativeManipulationDetector, FramingDetector, CognitiveDissonanceLayer, PropagandaDetector, NarrativeGraphLayer
 from .modules.activation import get_activation, ReCA
 from .model import EthicsModel, create_ethics_model
+from .common import collate_with_graphs, GraphBrainParserManager, process_text_to_hypergraph, prepare_graph_data_for_model
 
 # Optional API imports
 try:
@@ -45,6 +46,12 @@ __all__ = [
     'DoubleProcessingAttention',
     'PropagandaDetector',
     'NarrativeGraphLayer',
+    
+    # Common utilities
+    'collate_with_graphs',
+    'GraphBrainParserManager',
+    'process_text_to_hypergraph',
+    'prepare_graph_data_for_model',
     
     # API components
     'api_app'

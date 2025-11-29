@@ -187,7 +187,11 @@ def prepare_graph_data_for_model(hg_instance: Optional[hgraph]) -> Dict[str, Any
             edge_types_tensor = torch.zeros(0, dtype=torch.long)
         
         # Simple node features (one-hot encoding)
-        node_features = torch.eye(len(nodes)) if nodes else torch.zeros((0, 0))
+        # When nodes is empty, create a tensor with 0 rows but consistent feature dimension
+        if nodes:
+            node_features = torch.eye(len(nodes))
+        else:
+            node_features = torch.zeros((0, 1), dtype=torch.float)
         
         return {
             'has_graph': True,

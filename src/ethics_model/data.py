@@ -8,7 +8,6 @@ for GraphBrain and Instructor integrations.
 import torch
 from torch.utils.data import Dataset
 from typing import List, Dict, Optional, Any, Union, Callable
-import graphbrain as gb
 from graphbrain import hgraph
 import random
 from tqdm import tqdm

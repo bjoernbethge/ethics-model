@@ -1,7 +1,7 @@
 [project]
 name = "ethics-model"
 version = "0.1.0"
-description = "Add your description here"
+description = "A modern, modular PyTorch framework for ethical text analysis, manipulation detection, and narrative understanding"
 readme = "README.md"
 authors = [
     { name = "Björn Bethge"}

@@ -13,6 +13,13 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import PreTrainedTokenizer
 
+from .common import (
+    collate_with_graphs,
+    GraphBrainParserManager,
+    process_text_to_hypergraph,
+    prepare_graph_data_for_model
+)
+
 # Ethical domains in the ETHICS dataset
 DOMAINS = [
     "justice",
@@ -67,18 +74,10 @@ class ETHICSDataset(Dataset):
         
         # Initialize GraphBrain parser if needed
         self.parser = None
+        self.graph_cache: Dict[int, Any] = {}
         if self.use_graphbrain:
-            try:
-                import graphbrain as gb
-                self.parser = gb.Parser(model=f"{self.parser_lang}_core_web_sm")
-                self.graph_cache = {}
-            except ImportError:
-                print("GraphBrain not available. Install with 'pip install graphbrain'")
-                self.use_graphbrain = False
-            except Exception as e:
-                print(f"Error initializing GraphBrain parser: {e}")
-                print(f"Make sure you have the {self.parser_lang}_core_web_sm model installed:")
-                print(f"python -m spacy download {self.parser_lang}_core_web_sm")
+            self.parser = GraphBrainParserManager.get_parser(self.parser_lang)
+            if self.parser is None:
                 self.use_graphbrain = False
     
     def _load_data(self) -> pl.DataFrame:
@@ -170,28 +169,14 @@ class ETHICSDataset(Dataset):
         cache_key = hash(text)
         if self.cache_graphs and cache_key in self.graph_cache:
             return self.graph_cache[cache_key]
+        
+        hg = process_text_to_hypergraph(text, self.parser, self.parser_lang)
+        
+        # Cache result
+        if self.cache_graphs and hg is not None:
+            self.graph_cache[cache_key] = hg
             
-        try:
-            import graphbrain as gb
-            from graphbrain import hgraph
-            
-            # Create hypergraph
-            hg = hgraph()
-            
-            # Parse text and add to hypergraph
-            for sentence in text.split('.'):
-                if sentence.strip():
-                    parse = self.parser.parse(sentence)
-                    hg.add(parse)
-                    
-            # Cache result
-            if self.cache_graphs:
-                self.graph_cache[cache_key] = hg
-                
-            return hg
-        except Exception as e:
-            print(f"Error processing text to graph: {str(e)[:100]}")
-            return None
+        return hg
     
     def _prepare_graph_data(self, text: str) -> Dict[str, Any]:
         """
@@ -205,69 +190,7 @@ class ETHICSDataset(Dataset):
         """
         # Process text to graph
         hg = self._process_text_to_graph(text)
-        
-        if hg is None:
-            return {'has_graph': False}
-        
-        try:
-            import graphbrain as gb
-            
-            # Extract nodes (atoms)
-            nodes = list(hg.all_atoms())
-            
-            # Create node map for edge index creation
-            node_map = {node: i for i, node in enumerate(nodes)}
-            
-            # Create edge index
-            edge_index = []
-            edge_types = []
-            
-            # Extract edges
-            for edge in hg.all_edges():
-                if len(edge) > 1:
-                    pred = edge[0]  # Predicate is typically first
-                    
-                    if gb.is_atom(pred):
-                        pred_idx = node_map.get(pred)
-                        
-                        if pred_idx is not None:
-                            # Connect predicate to all arguments
-                            for i in range(1, len(edge)):
-                                if gb.is_atom(edge[i]):
-                                    arg_idx = node_map.get(edge[i])
-                                    
-                                    if arg_idx is not None:
-                                        # Add bidirectional connections
-                                        edge_index.append([pred_idx, arg_idx])
-                                        edge_index.append([arg_idx, pred_idx])
-                                        
-                                        # Add edge types (simplified)
-                                        edge_type = 0  # Default
-                                        edge_types.append(edge_type)
-                                        edge_types.append(edge_type)
-            
-            # Convert to tensors
-            if edge_index:
-                edge_index_tensor = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-                edge_types_tensor = torch.tensor(edge_types, dtype=torch.long)
-            else:
-                # Empty graph fallback
-                edge_index_tensor = torch.zeros((2, 0), dtype=torch.long)
-                edge_types_tensor = torch.zeros(0, dtype=torch.long)
-            
-            # Simple node features (one-hot encoding)
-            node_features = torch.eye(len(nodes))
-            
-            return {
-                'has_graph': True,
-                'nodes': nodes,
-                'node_features': node_features,
-                'edge_index': edge_index_tensor,
-                'edge_types': edge_types_tensor
-            }
-        except Exception as e:
-            print(f"Error preparing graph data: {str(e)[:100]}")
-            return {'has_graph': False}
+        return prepare_graph_data_for_model(hg)
     
     def __len__(self) -> int:
         """Get the number of examples in the dataset."""
@@ -414,55 +337,6 @@ class ETHICSMultiDomainDataset(Dataset):
         item['domain'] = domain
         
         return item
-
-
-def collate_with_graphs(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Custom collate function for batches with graph data.
-    
-    Args:
-        batch: List of dataset items
-        
-    Returns:
-        Batched tensors and graph data
-    """
-    # Separate standard items and graph data
-    standard_items = {}
-    graph_data = {}
-    texts = []
-    domains = []
-    
-    for item in batch:
-        # Extract text and domain
-        texts.append(item.pop('text'))
-        if 'domain' in item:
-            domains.append(item.pop('domain'))
-        
-        # Separate graph data from standard items
-        graph_keys = [k for k in item.keys() if k.startswith('graph_')]
-        
-        for k in item.keys():
-            if k in graph_keys:
-                if k not in graph_data:
-                    graph_data[k] = []
-                graph_data[k].append(item[k])
-            else:
-                if k not in standard_items:
-                    standard_items[k] = []
-                standard_items[k].append(item[k])
-    
-    # Batch standard items
-    batched = {k: torch.stack(v) for k, v in standard_items.items()}
-    batched['texts'] = texts
-    
-    if domains:
-        batched['domains'] = domains
-    
-    # Add graph data
-    for k, v in graph_data.items():
-        batched[k] = v
-    
-    return batched
 
 
 def create_ethics_dataloaders(

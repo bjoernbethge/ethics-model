@@ -4,10 +4,12 @@ Welcome to the Ethics Model documentation! This directory contains comprehensive
 
 ## Quick Links
 
+- **[Quick Start Guide](./QUICKSTART.md)** - Get up and running in 10 minutes! 🚀
 - **[Training Guide](./TRAINING.md)** - Learn how to train models on the ETHICS dataset or custom data
-- **[API Documentation](./API.md)** - REST API reference and integration examples
+- **[API Documentation](./API.md)** - REST API reference and integration examples  
 - **[Model Architecture](./ARCHITECTURE.md)** - Technical details about the model architecture
-- **[Evaluation Guide](./EVALUATION.md)** - How to evaluate and benchmark models (coming soon)
+- **[Missing Frontend](./MISSING_FRONTEND.md)** - Status and roadmap for web UI development
+- **[Implementation Summary](./IMPLEMENTATION_SUMMARY.md)** - What's done, what's missing, and issues to track
 
 ## Getting Started
 

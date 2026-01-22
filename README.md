@@ -181,3 +181,73 @@ Run the full test suite:
 ```bash
 pytest tests/
 ```
+
+---
+
+## Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+- **[Training Guide](docs/TRAINING.md)** - How to train models on ETHICS dataset or custom data
+- **[API Documentation](docs/API.md)** - REST API reference and integration examples  
+- **[Model Architecture](docs/ARCHITECTURE.md)** - Technical details about the model architecture
+- **[Missing Frontend](docs/MISSING_FRONTEND.md)** - Status and roadmap for web UI development
+
+Quick links:
+- [Checkpoints Guide](checkpoints/README.md) - How to use and create model checkpoints
+- [Examples](examples/) - Example scripts and Jupyter notebooks
+- [PyPI Setup](PYPI_SETUP.md) - Packaging and distribution guide
+
+---
+
+## Checkpoints
+
+A basic checkpoint with randomly initialized weights is included for testing:
+
+```python
+import torch
+from ethics_model.model import create_ethics_model
+
+# Load checkpoint
+checkpoint = torch.load('checkpoints/basic_model.pt', map_location='cpu')
+
+# Create model
+model = create_ethics_model(checkpoint['config'])
+model.load_state_dict(checkpoint['model_state_dict'])
+model.eval()
+```
+
+⚠️ **Note**: The included checkpoint is for testing only. For production use, train on actual data using:
+
+```bash
+python examples/train_on_ethics_dataset.py \
+  --data_dir path/to/ethics_dataset \
+  --llm_model bert-base-uncased \
+  --batch_size 32 \
+  --epochs 10 \
+  --output_dir ./checkpoints
+```
+
+See the [Training Guide](docs/TRAINING.md) for detailed instructions.
+
+---
+
+## Project Status
+
+### ✅ Implemented
+- Core model architecture with LLM integration
+- Graph Neural Networks and semantic hypergraphs
+- Explainability and uncertainty quantification
+- REST API with FastAPI
+- Python client library
+- Training scripts and examples
+- Comprehensive documentation
+- Docker support
+- Basic checkpoint for testing
+
+### 🚧 Missing/Planned
+- **Frontend/UI**: No web interface currently available. See [MISSING_FRONTEND.md](docs/MISSING_FRONTEND.md) for details and roadmap.
+- **Production checkpoints**: Included checkpoint is for testing only. Train on ETHICS dataset for production use.
+- **Additional examples**: More use cases and integration examples planned.
+
+---
